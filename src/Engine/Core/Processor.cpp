@@ -2,7 +2,6 @@
 #include "../Context/EngineContext.hpp"
 #include "../Core/Layer.hpp"
 #include <thread>
-#include <chrono>
 
 Processor::Processor(EngineContext* ctx) : m_ctx(ctx) {}
 
@@ -11,34 +10,24 @@ void Processor::operator()() {
     std::vector<EngineEvent> frameEvents;
 
     double accumulator = 0.0;
-    const double timestep = 1.0 / 60.0; // Fixed physics step tick [cite: 1296]
-
-    const double MIN_TIMESTEP = 1.0 / 200.0; // Captures ultra-high refresh monitors (200Hz+)
-    const double MAX_TIMESTEP = 1.0 / 30.0;  // Safeguard against extreme frame drops
+    const double timestep = 1.0 / 100.0;
 
     while (m_ctx->isRunning.load(std::memory_order_relaxed)) {
-        double currentTime = glfwGetTime();
+        double currentTime = m_ctx->getTime();
         double deltaTime = currentTime - lastTime;
         lastTime = currentTime;
 
-        if (deltaTime < MIN_TIMESTEP) deltaTime = MIN_TIMESTEP;
-        if (deltaTime > MAX_TIMESTEP) deltaTime = MAX_TIMESTEP;
+        // Prevent accumulator explosion if you move/drag the window
+        if (deltaTime > 0.1) deltaTime = 0.1;
 
         accumulator += deltaTime;
 
         // 1. Safe, concurrent event acquisition
         m_ctx->eventSystem.acquireEvents(frameEvents);
-
         m_ctx->input.advance_frame_history();
 
-        // ============================================================================
-        // STEP 0: APPLY DEFERRED LAYER ACTIONS SECURELY OUTSIDE TRAVERSAL LOOPS
-        // ============================================================================
         m_ctx->layerStack->processDeferredCommands(m_ctx);
 
-        // ============================================================================
-        // 1. FIXED: NATIVE STRUCT VARIANT TYPE HYDRATION PASS
-        // ============================================================================
         for (const auto& event : frameEvents) {
             if (std::holds_alternative<KeyEvent>(event)) {
                 auto ev = std::get<KeyEvent>(event);
@@ -90,16 +79,21 @@ void Processor::operator()() {
         }
 
         // 4. Fixed Timestep Physics Simulation Loop [cite: 206-209]
-        for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
-            if ((*it)->isSuspended()) continue;
-            (*it)->update(deltaTime, m_ctx); // Passes dynamic frame delta cleanly down the pipe [cite: 207]
-            if ((*it)->blocksUpdates()) break;
+        while (accumulator >= timestep) {
+            for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+                if ((*it)->isSuspended()) continue;
+                (*it)->update(timestep, m_ctx);
+                if ((*it)->blocksUpdates()) break;
+            }
+            accumulator -= timestep;
         }
 
         // 5. Serialize Graphics and Build Render Stream (Zero Allocations)
         RenderData& writeBuffer = m_ctx->renderBuffer.getWriteBuffer();
         writeBuffer.reset();
         m_ctx->collisionWorld.clear_world();
+
+        writeBuffer.physicsAlpha = static_cast<float>(accumulator / timestep);
 
         for (auto& layer : layers) {
             if (layer->isVisible()) { // Skips rendering automatically if hidden/suspended
@@ -110,5 +104,6 @@ void Processor::operator()() {
         // 5. Atomic pointer swap across thread boundary [cite: 1112]
         m_ctx->renderBuffer.swap();
 
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 }

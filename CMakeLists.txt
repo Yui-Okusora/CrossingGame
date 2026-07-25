@@ -34,18 +34,18 @@ add_executable (CrossingGame
 
     # Graphics Rendering Pipeline
     "src/Engine/Graphics/AssetManager.cpp"
-    "src/Engine/Graphics/RenderCommands.cpp"
+    
 
     # Physics & Spatial Queries
     "src/Engine/Physics/CollisionEngine.cpp"
 
     # Immediate-Mode Interaction UI
-    "src/Engine/UI/UI.cpp"
+    
     "src/Engine/UI/UIContext.cpp"
 
     # Mathematical Utilities
     "src/Engine/Utils/CRC32_64/CRC32_64.cpp"
- "src/Game/Layers/TestSuiteLayers.cpp")
+ "src/Game/Layers/TestSuiteLayers.cpp" "src/Engine/Graphics/RenderStream.cpp")
 
 target_include_directories(CrossingGame PRIVATE include/ src/)
 

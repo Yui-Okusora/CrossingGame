@@ -19,16 +19,13 @@
 
 // Graphics & Arena Memory Command Streams
 #include "Graphics/AssetManager.hpp"
-#include "Graphics/RenderCommands.hpp"
-#include "Graphics/RenderComponents.hpp"
+#include "Graphics/RenderStream.hpp"
 
 // Spatial Databases & Physics Filters
 #include "Physics/CollisionEngine.hpp"
 
 // Pure Interaction Immediate-Mode UI Namespace
-#include "UI/UI.hpp"
 #include "UI/UIContext.hpp"
-#include "UI/UIAnchor.hpp"
 
 // Helper Utilities
 #include "Utils/Utils.hpp"

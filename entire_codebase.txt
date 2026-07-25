@@ -22,12 +22,12 @@
                 Layer.hpp
                 Processor.cpp
                 Processor.hpp
+                Scene.hpp
             Graphics/
                 AssetManager.cpp
                 AssetManager.hpp
-                RenderCommands.cpp
-                RenderCommands.hpp
-                RenderComponents.hpp
+                RenderStream.cpp
+                RenderStream.hpp
             Physics/
                 CollisionEngine.cpp
                 CollisionEngine.hpp
@@ -40,9 +40,6 @@
                 Window.cpp
                 Window.hpp
             UI/
-                UI.cpp
-                UI.hpp
-                UIAnchor.hpp
                 UIContext.cpp
                 UIContext.hpp
             Utils/
@@ -97,18 +94,18 @@ add_executable (CrossingGame
 
     # Graphics Rendering Pipeline
     "src/Engine/Graphics/AssetManager.cpp"
-    "src/Engine/Graphics/RenderCommands.cpp"
+    
 
     # Physics & Spatial Queries
     "src/Engine/Physics/CollisionEngine.cpp"
 
     # Immediate-Mode Interaction UI
-    "src/Engine/UI/UI.cpp"
+    
     "src/Engine/UI/UIContext.cpp"
 
     # Mathematical Utilities
     "src/Engine/Utils/CRC32_64/CRC32_64.cpp"
- "src/Game/Layers/TestSuiteLayers.cpp")
+ "src/Game/Layers/TestSuiteLayers.cpp" "src/Engine/Graphics/RenderStream.cpp")
 
 target_include_directories(CrossingGame PRIVATE include/ src/)
 
@@ -183,234 +180,7 @@ add_custom_command(TARGET CrossingGame POST_BUILD
 ﻿#include "Engine/Engine.hpp"
 #include <iostream>
 
-class TestSandboxLayer : public IEngineLayer {
-private:
-    // Core Simulation Metrics (infinite world canvas coordinates)
-    glm::vec2 m_playerPos{ 100.0f, 200.0f }, m_playerSize{ 64.0f, 64.0f };
-        glm::vec2 m_playerVelocity{ 0.0f, 0.0f }; // Persistent velocity vector tracking for impulse kinematics
-    glm::vec4 m_obstacle{ 500.0f, 350.0f, 120.0f, 120.0f };
 
-        // Smooth trailing hardware camera coordinate tracker
-        glm::vec2 m_cameraPos{ 0.0f, 0.0f };
-
-    std::string m_uiMessage = "WASD: Move | UI elements are resolution-independent and anchored!";
-
-        // Local Data Stores (Zero widget lifecycle tracking objects)
-        float m_masterVolume{ 0.6f };
-        std::string m_username{ "Type Here..." };
-        uint32_t m_textCursor{ static_cast<uint32_t>(m_username.size()) };
-
-        // Functional Element Activation State Flags
-        bool m_widgetsEnabled{ true };
-
-    AudioHandle m_bgm, m_click, m_hit;
-        enum CollisionIDs : uint32_t { ID_Player = 1, ID_Obstacle, ID_Btn1, ID_Sld1, ID_Txt1 };
-
-public:
-    void onAttach(EngineContext* ctx) override {
-        m_bgm = ctx->audioEngine.loadSound(SFX_PATH "bgm.mp3", true);
-            m_click = ctx->audioEngine.loadSound(SFX_PATH "click.mp3", false);
-            m_hit = ctx->audioEngine.loadSound(SFX_PATH "hit.mp3", false);
-            ctx->audioEngine.play(m_bgm, AudioCategory::Music, true);
-
-            // Bootstrap initial camera position directly onto the player to avoid a first-frame snap
-            glm::vec2 fbSize = ctx->window->getFramebufferSize();
-            float dpiX = ctx->scaleFactorX.load(std::memory_order_relaxed);
-            float dpiY = ctx->scaleFactorY.load(std::memory_order_relaxed);
-            glm::vec2 initialCanvas{ fbSize.x / dpiX, fbSize.y / dpiY };
-        m_cameraPos = m_playerPos - (initialCanvas * 0.5f) + (m_playerSize * 0.5f);
-    }
-
-    void handleEvent(const EngineEvent& event, EngineContext* ctx) override {
-        if (std::holds_alternative<KeyEvent>(event)) {
-            auto ev = std::get<KeyEvent>(event);
-            if (ev.key == GLFW_KEY_ESCAPE) {
-                ctx->isRunning.store(false, std::memory_order_relaxed);
-            }
-            // Dynamic Element Activation Trigger Toggle
-            if (ev.key == GLFW_KEY_T && ev.action == GLFW_PRESS) {
-                m_widgetsEnabled = !m_widgetsEnabled;
-                m_uiMessage = m_widgetsEnabled ? "UI elements activated." : "UI elements globally deactivated.";
-                ctx->audioEngine.play(m_click, AudioCategory::InteractSFX, false);
-            }
-        }
-    }
-
-    void update(double dt, EngineContext* ctx) override {
-        const float fDt = static_cast<float>(dt);
-
-        // 1. Process standard player steering direction vectors [cite: 21-23]
-        glm::vec2 inputDir{ 0.0f, 0.0f };
-        if (ctx->input.isKeyHeld(GLFW_KEY_W)) inputDir.y -= 1.0f;
-            if (ctx->input.isKeyHeld(GLFW_KEY_S)) inputDir.y += 1.0f;
-                if (ctx->input.isKeyHeld(GLFW_KEY_A)) inputDir.x -= 1.0f;
-                    if (ctx->input.isKeyHeld(GLFW_KEY_D)) inputDir.x += 1.0f;
-
-                        if (glm::length(inputDir) > 0.0f) {
-                            m_playerVelocity = glm::normalize(inputDir) * 450.0f; // Maintain stable velocity [cite: 23]
-                        }
-                        else {
-                            // Apply fluid deceleration damping when keys are released to make bounces noticeable
-                            m_playerVelocity = Utils::lerp2(m_playerVelocity, glm::vec2(0.0f, 0.0f), 0.15f, 0.01f);
-                        }
-
-        m_playerPos += m_playerVelocity * fDt; // Update position transform strip [cite: 23]
-
-        // Infinite canvas world limits containment
-        m_playerPos.x = glm::clamp(m_playerPos.x, -5000.0f, 5000.0f);
-        m_playerPos.y = glm::clamp(m_playerPos.y, -5000.0f, 5000.0f);
-
-        // ============================================================================
-        // ENHANCEMENT: ENHANCED KINEMATIC BOUNCE RESOLUTION
-        // Replaces simple boolean overlaps with physical restitution calculations
-        // ============================================================================
-        glm::vec4 playerRect{ m_playerPos.x, m_playerPos.y, m_playerSize.x, m_playerSize.y };
-            PhysicsManifold manifold = CollisionEngine::CalculateManifold(playerRect, m_obstacle);
-
-        if (manifold.intersected) {
-            ctx->audioEngine.stop(m_hit);
-                ctx->audioEngine.play(m_hit, AudioCategory::GameplaySFX, false);
-
-                // Instantly deflect velocity vectors across contact normals with a 70% bounce retention factor
-                CollisionEngine::ResolveKinematicBounce(m_playerPos, m_playerVelocity, m_playerSize, m_obstacle, 0.70f);
-        }
-
-        // 2. Compute Player-Centered Hardware Camera Targets
-        glm::vec2 fbSize = ctx->window->getFramebufferSize();
-            float dpiX = ctx->scaleFactorX.load(std::memory_order_relaxed);
-            float dpiY = ctx->scaleFactorY.load(std::memory_order_relaxed);
-            glm::vec2 logicalCanvas{ fbSize.x / dpiX, fbSize.y / dpiY };
-
-        glm::vec2 targetCameraPos = m_playerPos - (logicalCanvas * 0.5f) + (m_playerSize * 0.5f);
-
-        // Smoothly pan camera frames toward the target position using step lerping [cite: 396-398]
-        m_cameraPos = Utils::lerp2(m_cameraPos, targetCameraPos, 0.12f, 0.01f);
-    }
-
-    void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override {
-        // Fetch dynamic platform configurations to set up the viewport bounds
-        glm::vec2 fbSize = ctx->window->getFramebufferSize();
-            float dpiX = ctx->scaleFactorX.load(std::memory_order_relaxed);
-            float dpiY = ctx->scaleFactorY.load(std::memory_order_relaxed);
-            glm::vec2 canvas{ fbSize.x / dpiX, fbSize.y / dpiY };
-
-        // ============================================================================
-        // PASS 1: WORLD SPACE GRAPHICS COMMAND STREAM (SCROLLS WITH CAMERA)
-        // All elements pushed here render relative to world coordinates
-        // ============================================================================
-        writeBuffer.push_command(0, 0, ClearScreenPayload{ .color = { 0.08f, 0.08f, 0.1f, 1.0f } });
-            writeBuffer.push_command(1, 0, CameraPayload{ .position = m_cameraPos, .zoom = 1.0f });
-
-        // Draw entities into world coordinates [cite: 30-31]
-        glm::vec4 dynamicPlayerColor = !m_playerVelocity.x && !m_playerVelocity.y ? glm::vec4(0, 1, 0, 1) : glm::vec4(0.2f, 0.8f, 0.2f, 1.0f);
-        if (CollisionEngine::CalculateManifold({ m_playerPos.x, m_playerPos.y, m_playerSize.x, m_playerSize.y }, m_obstacle).intersected) {
-            dynamicPlayerColor = glm::vec4{ 1.0f, 0.15f, 0.15f, 1.0f }; // Flash Red on rigid impact [cite: 27]
-        }
-
-        writeBuffer.push_command(10, 0, RectPayload{ .dest_rect = m_obstacle, .color = { 0.4f, 0.15f, 0.15f, 1.0f }, .no_texture = true });
-            writeBuffer.push_command(20, 0, RectPayload{ .dest_rect = { m_playerPos.x, m_playerPos.y, m_playerSize.x, m_playerSize.y }, .color = dynamicPlayerColor, .no_texture = true });
-
-            // ============================================================================
-            // PASS 2: HUD SPACE RUN (PINNED RESOLUTION-INDEPENDENT COORD MARGINS)
-            // Forces camera views back to static layout rules
-            // ============================================================================
-            writeBuffer.push_command(799, 0, CameraPayload{ .position = {0,0}, .zoom = 1.0f });
-
-            // Dynamic coordinate resolution mapping via edge anchoring functions
-            glm::vec4 myBtnRect = UIAnchorEngine::CalculateBounds(canvas, glm::vec2(240, 50), glm::vec2(30, 30), UIAnchor::BottomLeft);
-        glm::vec4 mySliderRect = UIAnchorEngine::CalculateBounds(canvas, glm::vec2(300, 20), glm::vec2(30, 45), UIAnchor::BottomCenter);
-        glm::vec4 myTxtRect = UIAnchorEngine::CalculateBounds(canvas, glm::vec2(320, 45), glm::vec2(30, 32), UIAnchor::BottomRight);
-
-        // Render stationary HUD notification texts top-left [cite: 33-35]
-        TextPayload txt; txt.color = { 0.9f, 0.92f, 0.95f, 1.0f }; txt.scale = 0.35f; // Realigned standard scale point sizes [cite: 34]
-        snprintf(txt.text_content, sizeof(txt.text_content), "%s", m_uiMessage.c_str());
-            txt.position = { 30.0f, 40.0f }; writeBuffer.push_command(800, 0, txt);
-
-            snprintf(txt.text_content, sizeof(txt.text_content), "World Coordinates: X:%.1f Y:%.1f | Hotkey [T]: Toggle UI Activity", m_playerPos.x, m_playerPos.y);
-        txt.position = { 30.0f, 75.0f }; txt.color = glm::vec4(0.5f, 0.55f, 0.6f, 1.0f);
-        writeBuffer.push_command(800, 0, txt);
-
-        // ----------------------------------------------------------------------------
-        // DECLARATIVE INTERACTION UI LAYER WITH ELEMENT ACTIVATION GATES
-        // ----------------------------------------------------------------------------
-
-        // 1. Interactive Button Widget
-        UIState btn = UI::Button(ctx, ID_Btn1, myBtnRect, m_widgetsEnabled);
-            if (btn.clicked) {
-                ctx->audioEngine.play(m_click, AudioCategory::InteractSFX, false);
-                    m_uiMessage = "Telemetry modification payload successfully generated!";
-            }
-        writeBuffer.push_command(900, 0, ButtonPayload{
-            .dest_rect = myBtnRect,
-            .idle_color = {0.18f, 0.19f, 0.22f, 1.0f},
-            .hover_color = {0.25f, 0.26f, 0.32f, 1.0f},
-            .click_color = {0.12f, 0.45f, 0.75f, 1.0f},
-            .text_color = {1.0f, 1.0f, 1.0f, 1.0f},
-            .text_scale = 0.35f, // Fixed typography sizing scale metrics [cite: 39]
-            .is_hovered = btn.hovered,
-            .is_pressed = btn.pressed,
-            .no_texture = true,
-            .is_disabled = !m_widgetsEnabled, // Element-Level Draw Control
-            .label = "MUTATE TELEMETRY"
-            });
-
-        // 2. Interactive Slider Widget
-        UIState sld = UI::Slider(ctx, ID_Sld1, mySliderRect, m_masterVolume, m_widgetsEnabled);
-            if (m_widgetsEnabled) {
-                ctx->audioEngine.setCategoryVolume(AudioCategory::Master, m_masterVolume);
-            }
-        writeBuffer.push_command(900, 0, SliderPayload{
-            .track_rect = mySliderRect,
-            .track_color = m_widgetsEnabled ? glm::vec4(0.12f, 0.12f, 0.14f, 1.0f) : glm::vec4(0.08f, 0.08f, 0.09f, 1.0f),
-            .knob_color = !m_widgetsEnabled ? glm::vec4(0.2f, 0.2f, 0.22f, 1.0f) : sld.pressed ? glm::vec4{0.1f, 0.45f, 0.75f, 1.0f} : glm::vec4{0.4f, 0.4f, 0.45f, 1.0f},
-            .knob_size = {16, 30},
-            .normalized_value = m_masterVolume,
-            .use_textures = false
-            });
-
-        // 3. Interactive TextBox Widget
-        UIState box = UI::TextBox(ctx, ID_Txt1, myTxtRect, m_username, m_textCursor, m_widgetsEnabled);
-            TextBoxPayload tb{
-                .bounds = myTxtRect,
-                .background_color = m_widgetsEnabled ? glm::vec4(0.05f, 0.05f, 0.06f, 1.0f) : glm::vec4(0.08f, 0.08f, 0.09f, 1.0f),
-                .border_color = !m_widgetsEnabled ? glm::vec4(0.15f, 0.15f, 0.17f, 1.0f) : box.focused ? glm::vec4{0.1f, 0.45f, 0.75f, 1.0f} : glm::vec4{0.2f, 0.2f, 0.25f, 1.0f},
-                .text_color = m_widgetsEnabled ? glm::vec4(0.9f, 0.9f, 0.95f, 1.0f) : glm::vec4(0.35f, 0.35f, 0.38f, 1.0f),
-                .cursor_index = m_textCursor,
-                .text_scale = 0.35f, // Fixed typography sizing scale metrics [cite: 45]
-                .is_focused = box.focused
-        };
-        snprintf(tb.content, sizeof(tb.content), "%s", m_username.c_str());
-            writeBuffer.push_command(900, 0, tb);
-    }
-
-    void onDetach(EngineContext* ctx) override {}
-};
-
-//int main() {
-//    try {
-//        std::cout << "[Engine] Initializing Application Facade System...\n";
-//
-//        // 1. Spin up window context layers and graphic batch renderer blocks
-//        Application app("Horizon Engine - Multi-threaded Test Driver", 1200, 805);
-//
-//        // 2. Fetch the newly created engine context hub
-//        EngineContext& ctx = app.getContext();
-//
-//        // 3. Mount our testing layer into the composite execution stack
-//        ctx.layerStack->pushLayer(std::make_unique<TestSandboxLayer>(), &ctx);
-//
-//        // 4. Fire up loops (automatically spins up background simulation worker thread)
-//        std::cout << "[Engine] Bootstrapping Complete. Handing over loops to hardware cores.\n";
-//        app.run();
-//    }
-//    catch (const std::exception& e) {
-//        std::cerr << "[Fatal Exception Encountered]: " << e.what() << "\n";
-//        return -1;
-//    }
-//
-//    std::cout << "[Engine] Shutdown complete. Resources cleanly detached.\n";
-//    return 0;
-//}
 ```
 
 // ==========================================
@@ -438,16 +208,13 @@ public:
 
 // Graphics & Arena Memory Command Streams
 #include "Graphics/AssetManager.hpp"
-#include "Graphics/RenderCommands.hpp"
-#include "Graphics/RenderComponents.hpp"
+#include "Graphics/RenderStream.hpp"
 
 // Spatial Databases & Physics Filters
 #include "Physics/CollisionEngine.hpp"
 
 // Pure Interaction Immediate-Mode UI Namespace
-#include "UI/UI.hpp"
 #include "UI/UIContext.hpp"
-#include "UI/UIAnchor.hpp"
 
 // Helper Utilities
 #include "Utils/Utils.hpp"
@@ -495,11 +262,12 @@ EngineContext::~EngineContext() {
 #pragma once
 #include "../System/Window.hpp"
 #include "../System/AudioEngine.hpp"
-#include "../Graphics/RenderCommands.hpp"
+#include "../Graphics/RenderStream.hpp"
 #include "../System/EventSystem.hpp"
 #include "../Graphics/AssetManager.hpp"
 #include "../Physics/CollisionEngine.hpp"
 #include "../UI/UIContext.hpp"
+#include "../Utils/Utils.hpp"
 #include <atomic>
 #include <any>
 #include <string>
@@ -627,18 +395,30 @@ public:
     InputState input;
     CollisionEngine collisionWorld;
     UIContext ui;
-    DoubleBuffer<RenderData> renderBuffer;
+    TripleBuffer<RenderData> renderBuffer;
+
+    ViewportScale currentViewport;
 
     std::atomic<float> scaleFactorX{ 1.0f };
     std::atomic<float> scaleFactorY{ 1.0f };
-    std::atomic<float> framebufferWidth{ 1200.0f };
-    std::atomic<float> framebufferHeight{ 805.0f };
+    std::atomic<float> fbWidth{ 1200.0f };
+    std::atomic<float> fbHeight{ 805.0f };
+    std::atomic<float> physicsAlpha{ 0.0f };
+
+    glm::vec2 cameraPos{ 0.0f, 0.0f };
+
+    std::chrono::time_point<std::chrono::steady_clock> startTimePoint;
 
     gl2d::Font globalFont;
     std::unique_ptr<LayerStack> layerStack;
 
     EngineContext();
     ~EngineContext();
+
+    [[nodiscard]] inline double getTime() const noexcept {
+        auto currentTimePoint = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(currentTimePoint - startTimePoint).count();
+    }
 };
 ```
 
@@ -650,11 +430,14 @@ public:
 #include "Processor.hpp"
 #include "Layer.hpp"
 #include <algorithm>
+#include <iostream>
 
 Application::Application(const std::string& title, int w, int h) {
     if (!glfwInit()) throw std::runtime_error("GLFW initialization failed.");
 
-    WindowSpecs specs{ .title = title, .width = w, .height = h, .resizable = true, .fullscreen = false, .vSync = true, .fps = 60 };
+    m_ctx.startTimePoint = std::chrono::steady_clock::now();
+
+    WindowSpecs specs{ .title = title, .width = w, .height = h, .resizable = true, .fullscreen = false, .vSync = false, .fps = 60 };
     m_ctx.window = std::make_shared<Window>(specs);
     m_ctx.window->create(&m_ctx);
 
@@ -664,6 +447,7 @@ Application::Application(const std::string& title, int w, int h) {
     glfwSetCursorPosCallback(nativeWin, cursorPosCallback);
     glfwSetCharCallback(nativeWin, charInputCallback);
     glfwSetScrollCallback(nativeWin, scrollCallback);
+    glfwSetWindowContentScaleCallback(nativeWin, windowContentScaleCallback);
 
     gl2d::init();
     m_gl2dRenderer.create(0, 4000);
@@ -696,6 +480,15 @@ void Application::scrollCallback(GLFWwindow* window, double xoffset, double yoff
     ctx->eventSystem.pushEvent(MouseScrollEvent{ xoffset, yoffset });
 }
 
+void Application::windowContentScaleCallback(GLFWwindow* window, float xscale, float yscale) {
+    auto* ctx = static_cast<EngineContext*>(glfwGetWindowUserPointer(window));
+    if (ctx) {
+        // Sequentially consistent atomics guarantee both logic and render threads catch the scale flip instantly
+        ctx->scaleFactorX.store(xscale, std::memory_order_seq_cst);
+        ctx->scaleFactorY.store(yscale, std::memory_order_seq_cst);
+    }
+}
+
 void Application::run() {
     m_logicThread = std::thread(Processor(&m_ctx));
 
@@ -705,24 +498,27 @@ void Application::run() {
         glm::vec2 fbSize = m_ctx.window->getFramebufferSize();
         glViewport(0, 0, (int)fbSize.x, (int)fbSize.y);
 
-        m_ctx.framebufferWidth.store(fbSize.x, std::memory_order_relaxed);
-        m_ctx.framebufferHeight.store(fbSize.y, std::memory_order_relaxed);
+        m_ctx.fbWidth.store(fbSize.x, std::memory_order_relaxed);
+        m_ctx.fbHeight.store(fbSize.y, std::memory_order_relaxed);
 
-        float dpiScaleX = m_ctx.scaleFactorX.load(std::memory_order_relaxed);
-        float dpiScaleY = m_ctx.scaleFactorY.load(std::memory_order_relaxed);
+        m_gl2dRenderer.updateWindowMetrics((int)fbSize.x, (int)fbSize.y);
 
-        int logicalWidth = static_cast<int>(fbSize.x / dpiScaleX);
-        int logicalHeight = static_cast<int>(fbSize.y / dpiScaleY);
+        const glm::vec2 DESIGN_RESOLUTION = { 1200.0f, 805.0f };
+        float sx = fbSize.x / DESIGN_RESOLUTION.x;
+        float sy = fbSize.y / DESIGN_RESOLUTION.y;
 
-        m_gl2dRenderer.updateWindowMetrics(logicalWidth, logicalHeight);
+        float scale = std::min(sx, sy); // Pick the restrictive bounding aspect axis
+        glm::vec2 scaledCanvas = DESIGN_RESOLUTION * scale;
+
+        // Store the final computed transform directly into m_ctx so the input thread 
+        // can access it instantly for back-mapping clicks!
+        m_ctx.currentViewport.scale = scale;
+        m_ctx.currentViewport.offset = (fbSize - scaledCanvas) * 0.5f;
 
         RenderData& renderData = m_ctx.renderBuffer.getReadBuffer();
 
-        m_gl2dRenderer.clearScreen({ 0, 0, 0, 1 }); // Clear frame baseline color
+        m_gl2dRenderer.clearScreen({ 0, 0, 1, 1 }); // Clear frame baseline color
 
-        // High-Speed Sorting Phase: Groups commands by layer visibility depth first, 
-        // then sub-groups by texture/material key. This groups identical resources together 
-        // automatically so gl2d can merge geometries into minimal draw calls.
         std::sort(renderData.commands.begin(), renderData.commands.end(),
             [](RenderCommand a, RenderCommand b) noexcept {
                 if (a.layer_depth != b.layer_depth) {
@@ -748,8 +544,6 @@ void Application::run() {
         }
 
         m_gl2dRenderer.flush(); // Consolidate batch arrays and issue drawing hooks to the GPU
-
-        m_ctx.renderBuffer.releaseReadBuffer();
 
         m_ctx.window->update();
     }
@@ -784,6 +578,7 @@ private:
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
     static void charInputCallback(GLFWwindow* window, unsigned int codepoint);
     static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
+    static void windowContentScaleCallback(GLFWwindow* window, float xscale, float yscale);
 
 public:
     Application(const std::string& title, int w, int h);
@@ -882,7 +677,7 @@ void LayerStack::processDeferredCommands(EngineContext* ctx) {
 // ==========================================
 ```cpp
 #pragma once
-#include "../Graphics/RenderCommands.hpp"
+#include "../Graphics/RenderStream.hpp"
 #include "../System/EventSystem.hpp"
 #include <memory>
 #include <vector>
@@ -954,7 +749,6 @@ public:
 #include "../Context/EngineContext.hpp"
 #include "../Core/Layer.hpp"
 #include <thread>
-#include <chrono>
 
 Processor::Processor(EngineContext* ctx) : m_ctx(ctx) {}
 
@@ -963,28 +757,24 @@ void Processor::operator()() {
     std::vector<EngineEvent> frameEvents;
 
     double accumulator = 0.0;
-    const double timestep = 1.0 / 60.0; // Fixed physics step tick [cite: 1296]
+    const double timestep = 1.0 / 100.0;
 
     while (m_ctx->isRunning.load(std::memory_order_relaxed)) {
-        double currentTime = glfwGetTime();
+        double currentTime = m_ctx->getTime();
         double deltaTime = currentTime - lastTime;
         lastTime = currentTime;
+
+        // Prevent accumulator explosion if you move/drag the window
+        if (deltaTime > 0.1) deltaTime = 0.1;
 
         accumulator += deltaTime;
 
         // 1. Safe, concurrent event acquisition
         m_ctx->eventSystem.acquireEvents(frameEvents);
-
         m_ctx->input.advance_frame_history();
 
-        // ============================================================================
-        // STEP 0: APPLY DEFERRED LAYER ACTIONS SECURELY OUTSIDE TRAVERSAL LOOPS
-        // ============================================================================
         m_ctx->layerStack->processDeferredCommands(m_ctx);
 
-        // ============================================================================
-        // 1. FIXED: NATIVE STRUCT VARIANT TYPE HYDRATION PASS
-        // ============================================================================
         for (const auto& event : frameEvents) {
             if (std::holds_alternative<KeyEvent>(event)) {
                 auto ev = std::get<KeyEvent>(event);
@@ -1002,6 +792,9 @@ void Processor::operator()() {
             }
             else if (std::holds_alternative<MouseMoveEvent>(event)) {
                 auto ev = std::get<MouseMoveEvent>(event);
+
+                // FIX: Pass raw mouse positions directly. 
+                // This guarantees your cursor position perfectly aligns with your UI boundaries!
                 m_ctx->input.mousePos = glm::vec2(static_cast<float>(ev.x), static_cast<float>(ev.y));
             }
             // FIX: Match explicitly against your defined type structures
@@ -1032,11 +825,10 @@ void Processor::operator()() {
             }
         }
 
-        // 4. Fixed Timestep Physics Simulation Loop
+        // 4. Fixed Timestep Physics Simulation Loop [cite: 206-209]
         while (accumulator >= timestep) {
             for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
-                if ((*it)->isSuspended()) continue; // SKIP LOGIC CLOCKS IF SUSPENDED
-
+                if ((*it)->isSuspended()) continue;
                 (*it)->update(timestep, m_ctx);
                 if ((*it)->blocksUpdates()) break;
             }
@@ -1048,6 +840,8 @@ void Processor::operator()() {
         writeBuffer.reset();
         m_ctx->collisionWorld.clear_world();
 
+        writeBuffer.physicsAlpha = static_cast<float>(accumulator / timestep);
+
         for (auto& layer : layers) {
             if (layer->isVisible()) { // Skips rendering automatically if hidden/suspended
                 layer->populateRenderStream(writeBuffer, m_ctx);
@@ -1057,7 +851,7 @@ void Processor::operator()() {
         // 5. Atomic pointer swap across thread boundary [cite: 1112]
         m_ctx->renderBuffer.swap();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Prevents high-speed thread saturation
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 }
 ```
@@ -1076,6 +870,120 @@ private:
 public:
     Processor(EngineContext* ctx);
     void operator()();
+};
+```
+
+// ==========================================
+// FILE: src\Engine\Core\Scene.hpp
+// ==========================================
+```cpp
+#pragma once
+#include "../Context/EngineContext.hpp"
+#include "../Graphics/RenderStream.hpp"
+#include "../Physics/CollisionEngine.hpp"
+#include <vector>
+#include <memory>
+#include <algorithm>
+
+class Entity2D {
+public:
+    uint32_t id = 0;
+    glm::vec2 position{ 0.0f, 0.0f };
+    glm::vec2 prevPosition{ 0.0f, 0.0f };
+    glm::vec2 size{ 32.0f, 32.0f };
+    glm::vec2 velocity{ 0.0f, 0.0f };
+
+    uint32_t layer = CollisionLayer::Layer_None;
+    uint32_t mask = CollisionLayer::Layer_All;
+
+    bool isStatic = false;
+    bool isTrigger = false;
+    bool active = true;
+
+    virtual ~Entity2D() = default;
+
+    // --- Pure Event Callbacks ---
+    virtual void onUpdate(float dt, EngineContext* ctx) {}
+    virtual void onCollision(const CollisionResult& collision, EngineContext* ctx) {}
+    virtual void onTrigger(const CollisionResult& trigger, EngineContext* ctx) {}
+    virtual void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {}
+};
+
+class Scene2D {
+private:
+    std::vector<std::unique_ptr<Entity2D>> m_entities;
+    std::vector<CollisionResult> m_rawQueryBuffer;
+
+public:
+    void fixedUpdate(double dt, EngineContext* ctx) {
+        float fDt = static_cast<float>(dt);
+
+        // 1. Advance Physics Movement
+        for (auto& entity : m_entities) {
+            if (!entity->active) continue;
+            entity->prevPosition = entity->position;
+            entity->onUpdate(fDt, ctx);
+
+            if (!entity->isStatic) {
+                entity->position += entity->velocity * fDt;
+            }
+        }
+
+        // 2. Evaluate Spatial Collisions & Dispatch Callbacks
+        for (auto& entity : m_entities) {
+            if (!entity->active || entity->layer == CollisionLayer::Layer_None) continue;
+
+            glm::vec4 currentBox{ entity->position.x, entity->position.y, entity->size.x, entity->size.y };
+            m_rawQueryBuffer.clear();
+            ctx->collisionWorld.query_aabb(currentBox, entity->layer, entity->mask, m_rawQueryBuffer);
+
+            for (const auto& rawHit : m_rawQueryBuffer) {
+                if (rawHit.targetId == entity->id) continue; // Skip self-intersection
+
+                // Calculate exact contact manifold
+                PhysicsManifold manifold = CollisionEngine::CalculateManifold(currentBox, rawHit.intersected_bounds);
+                if (!manifold.intersected) continue;
+
+                CollisionResult info{
+                    .targetId = rawHit.targetId,
+                    .targetLayer = rawHit.targetLayer,
+                    .isTrigger = entity->isTrigger,
+                    .manifold = manifold
+                };
+
+                // Dispatch to callbacks
+                if (entity->isTrigger) {
+                    entity->onTrigger(info, ctx);
+                }
+                else {
+                    entity->onCollision(info, ctx);
+                }
+            }
+        }
+
+        // Clean up destroyed entities
+        std::erase_if(m_entities, [](const auto& e) { return !e->active; });
+    }
+
+    void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
+        float alpha = writeBuffer.physicsAlpha;
+
+        for (auto& entity : m_entities) {
+            if (!entity->active) continue;
+
+            if (entity->layer != CollisionLayer::Layer_None) {
+                ctx->collisionWorld.register_collider(
+                    entity->id,
+                    glm::vec4{ entity->position.x, entity->position.y, entity->size.x, entity->size.y },
+                    entity->layer,
+                    entity->mask
+                );
+            }
+
+            glm::vec2 lerpedPos = glm::mix(entity->prevPosition, entity->position, alpha);
+            entity->onRender(writeBuffer, ctx, lerpedPos);
+        }
+    }
 };
 ```
 
@@ -1124,7 +1032,7 @@ gl2d::Texture AssetManager::getTexture(TextureHandle handle) {
 // ==========================================
 ```cpp
 #pragma once
-#include "../Graphics/RenderCommands.hpp"
+#include "../Graphics/RenderStream.hpp"
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -1153,229 +1061,170 @@ public:
 ```
 
 // ==========================================
-// FILE: src\Engine\Graphics\RenderCommands.cpp
+// FILE: src\Engine\Graphics\RenderStream.cpp
 // ==========================================
 ```cpp
-#include "RenderCommands.hpp"
+#include "RenderStream.hpp"
+#include "../Context/EngineContext.hpp"
+#include <gl2d/gl2d.h>
 
 RenderData::RenderData() {
-    commands.reserve(256);
-    payload_arena.reserve(4096);
+    commands.reserve(256); 
+        payload_arena.reserve(4096); 
 }
-
 RenderData::~RenderData() = default;
 
 void RenderData::reset() {
-    commands.clear();
-    payload_arena.clear();
+    commands.clear(); 
+    payload_arena.clear(); 
+    physicsAlpha = 0.0f;
+}
+
+void ClearScreenPayload::Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
+    renderer.clearScreen(reinterpret_cast<const ClearScreenPayload*>(payload)->color); 
+}
+
+void CameraPayload::Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
+    const auto& data = *reinterpret_cast<const CameraPayload*>(payload); 
+        renderer.currentCamera.position = data.position; 
+        renderer.currentCamera.zoom = data.zoom; 
+}
+
+void RectPayload::Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
+    const auto& data = *reinterpret_cast<const RectPayload*>(payload);
+    const auto& vp = ctx->currentViewport;
+
+    // 1. Convert world coordinates to camera coordinates if needed
+    glm::vec2 worldPos{ data.dest_rect.x, data.dest_rect.y };
+    if (data.is_world_space) {
+        worldPos -= ctx->cameraPos;
+    }
+
+    // 2. Apply viewport scale and letterbox offset
+    glm::vec4 scaledRect{
+        worldPos.x * vp.scale + vp.offset.x,
+        worldPos.y * vp.scale + vp.offset.y,
+        data.dest_rect.z * vp.scale,
+        data.dest_rect.w * vp.scale
+    };
+    glm::vec2 scaledOrigin = data.origin * vp.scale;
+
+    if (data.no_texture) {
+        renderer.renderRectangle(scaledRect, data.color, scaledOrigin, data.rotation);
+    }
+    else {
+        gl2d::Texture tex = ctx->assetManager.getTexture(data.texture);
+        gl2d::TextureAtlas customAtlas(data.atlas_dimensions.x, data.atlas_dimensions.y);
+        renderer.renderRectangle(scaledRect, tex, data.color, scaledOrigin, data.rotation,
+            customAtlas.get(data.atlas_pos.x, data.atlas_pos.y, data.flip_x));
+    }
+}
+
+void LinePayload::Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
+    const auto& data = *reinterpret_cast<const LinePayload*>(payload);
+    const auto& vp = ctx->currentViewport;
+
+    glm::vec2 scaledStart = data.start * vp.scale + vp.offset;
+    glm::vec2 scaledEnd = data.end * vp.scale + vp.offset;
+    float scaledThickness = data.thickness * vp.scale;
+
+    renderer.renderLine(scaledStart, scaledEnd, data.color, scaledThickness);
+}
+
+void TextPayload::Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
+    const auto& data = *reinterpret_cast<const TextPayload*>(payload);
+    const auto& vp = ctx->currentViewport;
+
+    glm::vec2 scaledPos = data.position * vp.scale + vp.offset;
+    float scaledSize = data.scale * vp.scale;
+
+    // gl2d's native renderText spacing parameter behaves in absolute screen pixels, 
+    // so we scale spacing alongside the typography boundaries
+    renderer.renderText(scaledPos, data.text_content, ctx->globalFont, data.color,
+        scaledSize, data.spacing * vp.scale, data.line_spacePixels * vp.scale, data.showInCenter);
 }
 ```
 
 // ==========================================
-// FILE: src\Engine\Graphics\RenderCommands.hpp
+// FILE: src\Engine\Graphics\RenderStream.hpp
 // ==========================================
 ```cpp
 #pragma once
 #include <vector>
-#include <atomic>
+#include <mutex>
 #include <cstdint>
-#include <thread>
+#include <glm/glm.hpp>
+#include "../Utils/Utils.hpp"
 
 class EngineContext;
 namespace gl2d { struct Renderer2D; }
 
-struct TextureHandle { uint32_t id = 0; };
+struct TextureHandle { uint32_t id = 0; }; 
 
-// Function pointer signature for stateless backend execution delegates
-using RenderExecutionFn = void(*)(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx);
+using RenderExecutionFn = void(*)(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 
 struct RenderCommand {
-    int32_t layer_depth;         // Primary sort: Layer visibility stacking
-    uint32_t sorting_key;        // Secondary sort: Material/Texture optimization key
-    RenderExecutionFn execute;   // Stateless rendering function delegate
-    uint32_t payload_offset;     // Offset position inside the flat byte arena buffer
+int32_t layer_depth; 
+    uint32_t sorting_key; 
+    RenderExecutionFn execute; 
+    uint32_t payload_offset; 
 };
 
 struct RenderData {
-    std::vector<RenderCommand> commands;
-    std::vector<uint8_t> payload_arena; // Flat, contiguous variable-sized memory pool
+    std::vector<RenderCommand> commands; 
+    std::vector<uint8_t> payload_arena; 
+    float physicsAlpha = 0.0f;
 
     RenderData();
     ~RenderData();
+    void reset(); 
 
-    void reset();
-
-    // ============================================================================
-    // OVERLOAD 1: AUTOMATIC EXECUTION DEDUCTION (Cleanest API)
-    // Passes the pre-initialized structure instance directly and deduces &T::Execute
-    // ============================================================================
     template<typename T>
     void push_command(int32_t depth, uint32_t sorting_key, T&& payloadInstance) {
-        // Clear references and const modifiers to resolve the exact underlying struct type
         using CleanType = std::remove_cvref_t<T>;
+        size_t current_offset = payload_arena.size(); 
+        size_t alignment = alignof(CleanType); 
 
-        size_t current_offset = payload_arena.size();
+        uintptr_t base_address = reinterpret_cast<uintptr_t>(payload_arena.data()); 
+        uintptr_t current_address = base_address + current_offset; 
 
-        // Use CleanType to find safe hardware memory alignment settings
-        size_t alignment = alignof(CleanType);
-        size_t padding = (alignment - (current_offset % alignment)) % alignment;
-        current_offset += padding;
+        size_t padding = (alignment - (current_address % alignment)) % alignment; 
+        current_offset += padding; 
 
-        size_t payload_size = sizeof(CleanType);
-        payload_arena.resize(current_offset + payload_size);
+        payload_arena.resize(current_offset + sizeof(CleanType)); 
 
-        // Explicitly copy/move construct the payload contents into the arena memory strip
-        CleanType* allocated_space = reinterpret_cast<CleanType*>(&payload_arena[current_offset]);
-        new (allocated_space) CleanType(std::forward<T>(payloadInstance));
+        CleanType* allocated_space = reinterpret_cast<CleanType*>(&payload_arena[current_offset]); 
+        new (allocated_space) CleanType(std::forward<T>(payloadInstance)); 
 
-        RenderCommand cmd;
-        cmd.layer_depth = depth;
-        cmd.sorting_key = sorting_key;
-        cmd.execute = &CleanType::Execute; // Auto-resolves stateless callback securely
-        cmd.payload_offset = static_cast<uint32_t>(current_offset);
-
-        commands.push_back(cmd);
-    }
-
-    // ============================================================================
-    // OVERLOAD 2: EXPLICIT DELEGATE OVERRIDE
-    // Permits passing a custom function execution callback pointer if needed
-    // ============================================================================
-    template<typename T>
-    void push_command(int32_t depth, uint32_t sorting_key, RenderExecutionFn execute, T&& payloadInstance) {
-        // Clear references and const modifiers to resolve the exact underlying struct type
-        using CleanType = std::remove_cvref_t<T>;
-
-        size_t current_offset = payload_arena.size();
-
-        // Use CleanType to find safe hardware memory alignment settings
-        size_t alignment = alignof(CleanType);
-        size_t padding = (alignment - (current_offset % alignment)) % alignment;
-        current_offset += padding;
-
-        size_t payload_size = sizeof(CleanType);
-        payload_arena.resize(current_offset + payload_size);
-
-        // Explicitly copy/move construct the payload contents into the arena memory strip
-        CleanType* allocated_space = reinterpret_cast<CleanType*>(&payload_arena[current_offset]);
-        new (allocated_space) CleanType(std::forward<T>(payloadInstance));
-
-        RenderCommand cmd;
-        cmd.layer_depth = depth;
-        cmd.sorting_key = sorting_key;
-        cmd.execute = execute;
-        cmd.payload_offset = static_cast<uint32_t>(current_offset);
-
-        commands.push_back(cmd);
+        commands.push_back(RenderCommand{ depth, sorting_key, &CleanType::Execute, static_cast<uint32_t>(current_offset) }); 
     }
 };
 
-template<typename T>
-class DoubleBuffer {
-private:
-    T m_buffers[2];
-    std::atomic<uint32_t> m_writeIndex{ 0 };
-    std::atomic<bool> m_isRenderReading[2]{ false, false }; // Tracks reader locks per buffer side
-
-public:
-    T& getWriteBuffer() noexcept {
-        return m_buffers[m_writeIndex.load(std::memory_order_relaxed)];
-    }
-
-    T& getReadBuffer() noexcept {
-        uint32_t readIdx = 1 - m_writeIndex.load(std::memory_order_acquire);
-        m_isRenderReading[readIdx].store(true, std::memory_order_release); // Establish read lock
-        return m_buffers[readIdx];
-    }
-
-    // Call this on the render thread to release ownership of the buffer data structures
-    void releaseReadBuffer() noexcept {
-        uint32_t readIdx = 1 - m_writeIndex.load(std::memory_order_relaxed);
-        m_isRenderReading[readIdx].store(false, std::memory_order_release); // Relinquish read lock
-    }
-
-    void swap() noexcept {
-        uint32_t currentWriteIdx = m_writeIndex.load(std::memory_order_relaxed);
-        uint32_t nextWriteIdx = 1 - currentWriteIdx;
-
-        // CRITICAL: Spin-wait until the render thread has fully released the target buffer side.
-        // Prevents the logic thread from lapping the render pipeline and clearing vectors mid-draw.
-        while (m_isRenderReading[nextWriteIdx].load(std::memory_order_acquire)) {
-            std::this_thread::yield();
-        }
-
-        m_writeIndex.store(nextWriteIdx, std::memory_order_release);
-    }
-};
-```
-
-// ==========================================
-// FILE: src\Engine\Graphics\RenderComponents.hpp
-// ==========================================
-```cpp
-#pragma once
-#include <glm/glm.hpp>
-#include "../Context/EngineContext.hpp"
-
+// Primitive Composed Command Packets 
 struct ClearScreenPayload {
     glm::vec4 color;
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const ClearScreenPayload*>(payload);
-        renderer.clearScreen(data.color);
-    }
+    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 };
 
 struct CameraPayload {
     glm::vec2 position;
     float zoom;
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const CameraPayload*>(payload);
-        renderer.currentCamera.position = data.position;
-        renderer.currentCamera.zoom = data.zoom;
-    }
+    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 };
 
 struct RectPayload {
     glm::vec4 dest_rect;
     glm::vec4 color;
     TextureHandle texture;
+    glm::uvec2 atlas_dimensions{ 1, 1 }; 
+    glm::uvec2 atlas_pos{ 0, 0 }; 
+    glm::vec2 origin{ 0.0f, 0.0f }; 
+    float rotation = 0.0f; 
+    bool flip_x = false; 
+    bool no_texture = true;
+    bool is_world_space = false;
 
-    // Atlas Configurations (Dynamically driven by individual logic layers)
-    glm::uvec2 atlas_dimensions; // e.g., { 15, 1 } or { 8, 8 }
-    glm::uvec2 atlas_pos;        // Grid coordinates: { x, y }
-
-    glm::vec2 origin;            // Center point of rotation/scaling transformation
-    float rotation;              // Angle of rotation in radians or degrees
-
-    bool flip_x;
-    bool flip_y;
-    bool no_texture;
-    bool is_disabled;
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const RectPayload*>(payload);
-
-        if (data.no_texture) {
-            renderer.renderRectangle(data.dest_rect, data.color, data.origin, data.rotation);
-        }
-        else {
-            gl2d::Texture tex = ctx->assetManager.getTexture(data.texture);
-
-            // Dynamic atlas construction from payload definitions
-            gl2d::TextureAtlas customAtlas(data.atlas_dimensions.x, data.atlas_dimensions.y);
-
-            renderer.renderRectangle(
-                data.dest_rect,
-                tex,
-                data.color,
-                data.origin,
-                data.rotation,
-                customAtlas.get(data.atlas_pos.x, data.atlas_pos.y, data.flip_x)
-            );
-        }
-    }
+    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 };
 
 struct LinePayload {
@@ -1383,186 +1232,49 @@ struct LinePayload {
     glm::vec2 end;
     glm::vec4 color;
     float thickness;
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const LinePayload*>(payload);
-        renderer.renderLine(data.start, data.end, data.color, data.thickness);
-    }
+    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 };
 
 struct TextPayload {
     glm::vec2 position = {};
     glm::vec4 color = {};
-    float scale = 64.0f;
-    float spacing = 4.0f;
-    float line_spacePixels = 3.0f;
-    bool showInCenter = false;
-    bool is_disabled;
+    float scale = 24.0f; 
+    float spacing = 4.0f; 
+    float line_spacePixels = 3.0f; 
+    bool showInCenter = false; 
+    char text_content[128] = { 0 }; 
 
-    // Inline text cache buffer to ensure safe multi-threaded snapshot lifetimes
-    char text_content[128];
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const TextPayload*>(payload);
-
-        // Render characters securely out of the continuous command memory track
-        renderer.renderText(data.position, data.text_content, ctx->globalFont, data.color, data.scale, data.spacing, data.line_spacePixels, data.showInCenter);
-    }
+    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 };
 
-struct ButtonPayload {
-    glm::vec4 dest_rect;
-    glm::vec4 idle_color;
-    glm::vec4 hover_color;
-    glm::vec4 click_color;
-    glm::vec4 text_color;
+// Triple Buffer Lockless Sync Framework 
+template<typename T>
+class TripleBuffer {
+private:
+    T m_buffers[3]; 
+        uint32_t m_logicIdx = 0; 
+        uint32_t m_renderIdx = 1; 
+        uint32_t m_sharedIdx = 2; 
+        bool m_hasNewData = false; 
+        std::mutex m_exchangeMutex; 
 
-    TextureHandle texture;
-    float text_scale;
-    bool is_hovered;
-    bool is_pressed;
-    bool no_texture;
-    bool is_disabled;
+public:
+    T& getWriteBuffer() noexcept { return m_buffers[m_logicIdx]; }
 
-    // Fixed char array prevents multi-threaded pointer invalidation
-    char label[32];
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const ButtonPayload*>(payload);
-
-        // 1. Determine active color state based on interactive logic indicators
-        glm::vec4 activeColor = data.idle_color;
-        if (data.is_pressed)      activeColor = data.click_color;
-        else if (data.is_hovered) activeColor = data.hover_color;
-
-        // 2. Render background container geometry
-        if (data.no_texture) {
-            renderer.renderRectangle(data.dest_rect, activeColor, {}, 0.0f);
-        }
-        else {
-            gl2d::Texture tex = ctx->assetManager.getTexture(data.texture);
-            renderer.renderRectangle(data.dest_rect, tex, activeColor, {}, 0.0f);
-        }
-
-        // 3. Render centered UI label text string
-        if (data.label[0] != '\0') {
-            // Compute centered text offset approximations within the button window box
-            glm::vec2 textPos = glm::vec2(
-                data.dest_rect.x + 15.0f,
-                data.dest_rect.y + (data.dest_rect.w * 0.25f)
-            );
-            renderer.renderText(textPos, data.label, ctx->globalFont, data.text_color, data.text_scale);
-        }
-    }
-};
-
-struct SliderPayload {
-    glm::vec4 track_rect;
-    glm::vec4 track_color;
-    glm::vec4 knob_color;
-    glm::vec2 knob_size;
-
-    TextureHandle track_texture;
-    TextureHandle knob_texture;
-    float normalized_value; // Exact value percentage from 0.0f to 1.0f
-    bool use_textures;
-    bool is_disabled;
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const SliderPayload*>(payload);
-
-        // 1. Render base slider track track background
-        if (!data.use_textures) {
-            renderer.renderRectangle(data.track_rect, data.track_color, {}, 0.0f);
-        }
-        else {
-            gl2d::Texture trackTex = ctx->assetManager.getTexture(data.track_texture);
-            renderer.renderRectangle(data.track_rect, trackTex, data.track_color, {}, 0.0f);
-        }
-
-        // 2. Compute dynamic layout offset placement metrics for the handle knob center
-        float knobX = data.track_rect.x + (data.track_rect.z * data.normalized_value) - (data.knob_size.x * 0.5f);
-        float knobY = data.track_rect.y + (data.track_rect.w * 0.5f) - (data.knob_size.y * 0.5f);
-        glm::vec4 knobRect = glm::vec4(knobX, knobY, data.knob_size.x, data.knob_size.y);
-
-        // 3. Render the interactive handle knob element
-        if (!data.use_textures) {
-            renderer.renderRectangle(knobRect, data.knob_color, {}, 0.0f);
-        }
-        else {
-            gl2d::Texture knobTex = ctx->assetManager.getTexture(data.knob_texture);
-            renderer.renderRectangle(knobRect, knobTex, data.knob_color, {}, 0.0f);
-        }
-    }
-};
-
-struct TextBoxPayload {
-    glm::vec4 bounds;
-    glm::vec4 background_color;
-    glm::vec4 border_color;
-    glm::vec4 text_color;
-
-    uint32_t cursor_index;
-    float text_scale;
-    bool is_focused;
-    bool is_disabled;
-
-    char content[64]; // Stores raw snapshot characters securely across threads
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const TextBoxPayload*>(payload);
-
-        // 1. Render baseline backplate text frame container background
-        renderer.renderRectangle(data.bounds, data.background_color, {}, 0.0f);
-
-        // 2. Draw styled structural box outline border lines
-        // Left line, top line, right line, bottom line
-        renderer.renderLine({ data.bounds.x, data.bounds.y }, { data.bounds.x + data.bounds.z, data.bounds.y }, data.border_color, 2.0f);
-        renderer.renderLine({ data.bounds.x, data.bounds.y }, { data.bounds.x, data.bounds.y + data.bounds.w }, data.border_color, 2.0f);
-        renderer.renderLine({ data.bounds.x + data.bounds.z, data.bounds.y }, { data.bounds.x + data.bounds.z, data.bounds.y + data.bounds.w }, data.border_color, 2.0f);
-        renderer.renderLine({ data.bounds.x, data.bounds.y + data.bounds.w }, { data.bounds.x + data.bounds.z, data.bounds.y + data.bounds.w }, data.border_color, 2.0f);
-
-        // 3. Render strings content layout out of local memory tracks
-        glm::vec2 textPos = glm::vec2(data.bounds.x + 10.0f, data.bounds.y + (data.bounds.w * 0.25f));
-        renderer.renderText(textPos, data.content, ctx->globalFont, data.text_color, data.text_scale);
-
-        // 4. Render blinking caret vertical input line indicator if input box is active
-        if (data.is_focused) {
-            // basic dynamic offset character sizing approximation (e.g., 14 pixels per character scaling width)
-            float characterWidthOffset = static_cast<float>(data.cursor_index) * (28.0f * data.text_scale);
-            float cursorLineX = textPos.x + characterWidthOffset;
-
-            // Draw a blinking cursor tracking element (using a fast sine loop check)
-            if (static_cast<int>(glfwGetTime() * 4.0) % 2 == 0) {
-                glm::vec2 cursorStart = glm::vec2(cursorLineX, data.bounds.y + 6.0f);
-                glm::vec2 cursorEnd = glm::vec2(cursorLineX, data.bounds.y + data.bounds.w - 6.0f);
-                renderer.renderText(cursorStart, "|", ctx->globalFont, data.text_color, data.text_scale);
+        T& getReadBuffer() noexcept {
+        std::unique_lock<std::mutex> lock(m_exchangeMutex); 
+            if (m_hasNewData) {
+                
+                std::swap(m_renderIdx, m_sharedIdx); 
+                    m_hasNewData = false; 
             }
-        }
+        return m_buffers[m_renderIdx]; 
     }
-};
 
-struct DropdownHeaderPayload {
-    glm::vec4 bounds;
-    glm::vec4 color;
-    glm::vec4 text_color;
-    float text_scale;
-    bool is_disabled;
-    char selected_text[32];
-
-    static void Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {
-        const auto& data = *reinterpret_cast<const DropdownHeaderPayload*>(payload);
-
-        // 1. Draw header background box frame
-        renderer.renderRectangle(data.bounds, data.color, {}, 0.0f);
-
-        // 2. Render chosen item textual description
-        glm::vec2 textPos = glm::vec2(data.bounds.x + 10.0f, data.bounds.y + (data.bounds.w * 0.25f));
-        renderer.renderText(textPos, data.selected_text, ctx->globalFont, data.text_color, data.text_scale);
-
-        // 3. Render dropdown arrow indicator indicator primitive glyph on the edge boundary
-        glm::vec2 arrowPos = glm::vec2(data.bounds.x + data.bounds.z - 30.0f, data.bounds.y + (data.bounds.w * 0.25f));
-        renderer.renderText(arrowPos, "v", ctx->globalFont, data.text_color, data.text_scale);
+    void swap() noexcept {
+        std::unique_lock<std::mutex> lock(m_exchangeMutex); 
+            std::swap(m_logicIdx, m_sharedIdx); 
+            m_hasNewData = true; 
     }
 };
 ```
@@ -1652,9 +1364,10 @@ struct Collider {
 };
 
 struct CollisionResult {
-    uint32_t target_id;
-    uint32_t target_layer;
-    glm::vec4 intersected_bounds;
+    uint32_t targetId = 0;
+    uint32_t targetLayer = 0;
+    bool isTrigger = false;
+    PhysicsManifold manifold; // Intersected, contact_normal, penetration_depth
 };
 
 class CollisionEngine {
@@ -1719,6 +1432,33 @@ public:
             if (relVelProj < 0.0f) {
                 entityVelocity = entityVelocity - (1.0f + restitution) * relVelProj * manifold.contact_normal;
             }
+        }
+    }
+};
+
+class PhysicsResponse {
+public:
+    static inline void Slide(glm::vec2& position, glm::vec2& velocity, const PhysicsManifold& manifold) noexcept {
+        if (!manifold.intersected) return;
+
+        // Resolve overlap
+        position += manifold.contact_normal * manifold.penetration_depth;
+
+        // Slide velocity along collision tangent
+        float velProj = glm::dot(velocity, manifold.contact_normal);
+        if (velProj < 0.0f) {
+            velocity -= velProj * manifold.contact_normal;
+        }
+    }
+
+    static inline void Bounce(glm::vec2& position, glm::vec2& velocity, const PhysicsManifold& manifold, float restitution = 0.75f) noexcept {
+        if (!manifold.intersected) return;
+
+        position += manifold.contact_normal * manifold.penetration_depth;
+
+        float relVelProj = glm::dot(velocity, manifold.contact_normal);
+        if (relVelProj < 0.0f) {
+            velocity -= (1.0f + restitution) * relVelProj * manifold.contact_normal;
         }
     }
 };
@@ -2146,8 +1886,8 @@ void Window::create(void* applicationCtx)
     float xscale = 1.0f, yscale = 1.0f;
 
     glfwGetWindowContentScale(m_handle, &xscale, &yscale);
-    ctx->scaleFactorX.store(xscale, std::memory_order_relaxed);
-    ctx->scaleFactorY.store(yscale, std::memory_order_relaxed);
+    ctx->scaleFactorX.store(xscale, std::memory_order_seq_cst); // Upgraded from relaxed 
+    ctx->scaleFactorY.store(yscale, std::memory_order_seq_cst); // Upgraded from relaxed
 }
 
 void Window::applySettings()
@@ -2231,91 +1971,310 @@ private:
 ```
 
 // ==========================================
-// FILE: src\Engine\UI\UI.cpp
+// FILE: src\Engine\UI\UIContext.cpp
 // ==========================================
 ```cpp
-#include "UI.hpp"
 #include "UIContext.hpp"
 #include "../Context/EngineContext.hpp"
 #include "../Physics/CollisionEngine.hpp"
+#include "../Graphics/RenderStream.hpp"
+#include "../Utils/Utils.hpp"
 #include <algorithm>
+#include <vector>
 
-UIState UI::Button(EngineContext* ctx, uint32_t id, const glm::vec4& bounds, bool enabled) {
-    if (!enabled) return UIState{ .hovered = false, .pressed = false, .clicked = false, .focused = false };
+void UIContext::update_system_states(EngineContext* ctx) {
+    clicked_id = 0;
+    static std::vector<CollisionResult> scratchpad;
+    scratchpad.clear();
 
-    ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
-    return UIState{ .hovered = ctx->ui.is_hot(id), .pressed = ctx->ui.is_active(id), .clicked = ctx->ui.is_clicked(id) };
-}
+    // 1. Fetch the active logic viewport scale tracking values
+    const auto& vp = ctx->currentViewport;
 
-UIState UI::Slider(EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& outValue, bool enabled) {
-    if (!enabled) return UIState{ .hovered = false, .pressed = false, .clicked = false, .focused = false };
+    // 2. Map GLFW screen mouse coords backwards to fit virtual 1200x805 space bounds
+    glm::vec2 rawMouse = ctx->input.getMousePosition();
+    glm::vec2 virtualMouse{
+        (rawMouse.x - vp.offset.x) / vp.scale,
+        (rawMouse.y - vp.offset.y) / vp.scale
+    };
 
-    ctx->collisionWorld.register_collider(id, trackBounds, Layer_UI);
+    // 3. Perform point spatial queries using the corrected virtual coordinate
+    ctx->collisionWorld.query_point(virtualMouse, Layer_None, Layer_UI, scratchpad);
+    hot_id = scratchpad.empty() ? 0 : scratchpad[0].target_id;
 
-    if (ctx->ui.is_active(id)) {
-        float relativeX = ctx->input.getMousePosition().x - trackBounds.x;
-        outValue = std::clamp(relativeX / trackBounds.z, 0.0f, 1.0f);
+    if (ctx->input.isMouseButtonJustPressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        active_id = hot_id;
+        if (hot_id != focus_id) focus_id = 0;
     }
-    return UIState{ .hovered = ctx->ui.is_hot(id), .pressed = ctx->ui.is_active(id) };
+
+    if (ctx->input.isMouseButtonJustReleased(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (active_id != 0 && active_id == hot_id) {
+            clicked_id = active_id;
+            focus_id = active_id;
+        }
+        active_id = 0;
+    }
 }
 
-UIState UI::TextBox(EngineContext* ctx, uint32_t id, const glm::vec4& bounds, std::string& targetString, uint32_t& outCursor, bool enabled) {
-    if (!enabled) return UIState{ .hovered = false, .pressed = false, .clicked = false, .focused = false };
+bool UIContext::Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, const char* label, float textScale) {
+    ctx->collisionWorld.register_collider(id, bounds, Layer_UI); 
+        UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) }; 
 
+        glm::vec4 activeColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } :
+        state.hovered ? glm::vec4{ 0.25f, 0.28f, 0.35f, 1.0f } : glm::vec4{ 0.18f, 0.19f, 0.22f, 1.0f }; 
+
+        writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = bounds, .color = activeColor, .no_texture = true }); 
+
+        if (label && label[0] != '\0') {
+            
+            glm::vec2 centerPoint{ bounds.x + (bounds.z * 0.5f), bounds.y + (bounds.w * 0.5f) }; 
+                TextPayload txt{ .position = centerPoint, .color = {1, 1, 1, 1}, .scale = textScale, .showInCenter = true }; 
+                snprintf(txt.text_content, sizeof(txt.text_content), "%s", label); 
+                writeBuffer.push_command(910, 0, txt); 
+        }
+    return state.clicked; 
+}
+
+bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& value) {
+    ctx->collisionWorld.register_collider(id, trackBounds, Layer_UI); 
+        UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) }; 
+
+        if (state.pressed) {
+            
+            float relativeX = ctx->input.getMousePosition().x - trackBounds.x; 
+                value = std::clamp(relativeX / trackBounds.z, 0.0f, 1.0f); 
+        }
+
+    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = trackBounds, .color = {0.06f, 0.06f, 0.08f, 1.0f}, .no_texture = true }); 
+
+        float knobX = trackBounds.x + (trackBounds.z * value) - 8.0f; 
+        float knobY = trackBounds.y + (trackBounds.w * 0.5f) - 15.0f; 
+        glm::vec4 knobColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } : glm::vec4{ 0.45f, 0.45f, 0.5f, 1.0f }; 
+
+        writeBuffer.push_command(910, 0, RectPayload{ .dest_rect = {knobX, knobY, 16.0f, 30.0f}, .color = knobColor, .no_texture = true }); 
+        return state.pressed; 
+}
+
+void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, std::string& text, uint32_t& cursor, float textScale) {
     ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
-    bool focused = ctx->ui.is_focused(id);
+    UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
 
-    if (focused) {
-        if (targetString == "Type Here...") { targetString.clear(); outCursor = 0; }
-
+    if (state.focused) {
+        if (text == "Type Here...") { text.clear(); cursor = 0; }
         for (uint8_t i = 0; i < ctx->input.unicode_count; ++i) {
             uint32_t cp = ctx->input.unicode_queue[i];
-            if (cp >= 32 && cp <= 126 && targetString.size() < 30) {
-                targetString.insert(targetString.begin() + outCursor++, static_cast<char>(cp));
+            if (cp >= 32 && cp <= 126 && text.size() < 30) {
+                text.insert(text.begin() + cursor++, static_cast<char>(cp));
             }
         }
-        if (ctx->input.isKeyJustPressed(GLFW_KEY_BACKSPACE) && outCursor > 0) {
-            targetString.erase(targetString.begin() + (--outCursor));
+        static double nextBackspaceTime = 0.0;
+        constexpr double INITIAL_DELAY = 0.40; // 400ms delay before repeat starts
+        constexpr double REPEAT_RATE = 0.04; // 40ms interval between deletions (~25 chars/sec)
+
+        if (ctx->input.isKeyJustPressed(GLFW_KEY_BACKSPACE)) {
+            if (cursor > 0) {
+                text.erase(text.begin() + (--cursor));
+            }
+            // Set initial delay before auto-repeat kicks in
+            nextBackspaceTime = ctx->getTime() + INITIAL_DELAY;
+        }
+        else if (ctx->input.isKeyHeld(GLFW_KEY_BACKSPACE)) {
+            double currentTime = ctx->getTime();
+            if (currentTime >= nextBackspaceTime) {
+                if (cursor > 0) {
+                    text.erase(text.begin() + (--cursor));
+                }
+                // Advance timer by repeat step
+                nextBackspaceTime = currentTime + REPEAT_RATE;
+            }
         }
     }
-    return UIState{ .hovered = ctx->ui.is_hot(id), .focused = focused };
+
+    glm::vec4 borderColor = state.focused ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } : glm::vec4{ 0.2f, 0.22f, 0.26f, 1.0f };
+    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = bounds, .color = {0.02f, 0.02f, 0.03f, 1.0f}, .no_texture = true });
+    writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y}, {bounds.x + bounds.z, bounds.y}, borderColor, 2.0f });
+    writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y}, {bounds.x, bounds.y + bounds.w}, borderColor, 2.0f });
+    writeBuffer.push_command(905, 0, LinePayload{ {bounds.x + bounds.z, bounds.y}, {bounds.x + bounds.z, bounds.y + bounds.w}, borderColor, 2.0f });
+    writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y + bounds.w}, {bounds.x + bounds.z, bounds.y + bounds.w}, borderColor, 2.0f });
+
+    float baselineY = bounds.y + bounds.w - ((bounds.w - textScale) * 0.5f);
+    glm::vec2 textPos{ bounds.x + 12.0f, baselineY };
+
+    TextPayload txt{ .position = textPos, .color = {0.95f, 0.95f, 1.0f, 1.0f}, .scale = textScale };
+    snprintf(txt.text_content, sizeof(txt.text_content), "%s", text.c_str());
+    writeBuffer.push_command(910, 0, txt);
+
+    if (state.focused && ctx->globalFont.packedCharsBuffer) {
+        const auto* packedChars = static_cast<const stbtt_packedchar*>(ctx->globalFont.packedCharsBuffer);
+
+        // gl2d initializes stbtt_PackFontRange at a default baked font height of 96.0f
+        constexpr float baseBakedFontHeight = 96.0f;
+        float fontScale = textScale / baseBakedFontHeight;
+        constexpr float fontSpacing = 4.0f; // Matches TextPayload::spacing default
+
+        float cursorOffset = 0.0f;
+        size_t sampleLength = std::min<size_t>(cursor, text.size());
+
+        for (size_t i = 0; i < sampleLength; ++i) {
+            char c = text[i];
+            if (c == ' ') {
+                float spaceAdvance = (ctx->globalFont.spaceSize > 0.0f) ? ctx->globalFont.spaceSize : packedChars[0].xadvance;
+                cursorOffset += (spaceAdvance * fontScale) + fontSpacing;
+            }
+            else if (c >= ' ' && c <= '~') {
+                // Direct xadvance lookup from stbtt_packedchar array (c - 32)
+                float advance = packedChars[c - 32].xadvance;
+                cursorOffset += (advance * fontScale) + fontSpacing;
+            }
+        }
+
+        float cursorX = textPos.x + cursorOffset;
+
+        if (static_cast<int>(ctx->getTime() * 4.0) % 2 == 0) {
+            writeBuffer.push_command(920, 0, LinePayload{
+                {cursorX, baselineY + 2.0f},
+                {cursorX, baselineY - textScale + 2.0f},
+                {0.1f, 0.45f, 0.75f, 1.0f},
+                2.0f
+                });
+        }
+    }
 }
 ```
 
 // ==========================================
-// FILE: src\Engine\UI\UI.hpp
+// FILE: src\Engine\UI\UIContext.hpp
 // ==========================================
 ```cpp
 #pragma once
-#include <glm/glm.hpp>
-#include <string>
-
-class EngineContext;
-struct UIState;
-
-namespace UI {
-    // Registers bounds and resolves mouse interaction triggers
-    UIState Button(EngineContext* ctx, uint32_t id, const glm::vec4& bounds, bool enabled = true);
-
-    // Processes mouse drag percentages and mutates your local value float inline
-    UIState Slider(EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& outValue, bool enabled = true);
-
-    // Drains the UTF-32 character stream into your target string inline
-    UIState TextBox(EngineContext* ctx, uint32_t id, const glm::vec4& bounds, std::string& targetString, uint32_t& outCursor, bool enabled = true);
-}
-```
-
-// ==========================================
-// FILE: src\Engine\UI\UIAnchor.hpp
-// ==========================================
-```cpp
-#pragma once
-#include <glm/glm.hpp>
-
-// src/Engine/UI/UIAnchor.hpp
-#pragma once
-#include <glm/glm.hpp>
 #include <cstdint>
+#include <string>
+#include <glm/glm.hpp>
+
+// Forward declarations to break circular header dependencies safely
+class EngineContext;
+struct RenderData;
+
+// Lightweight structural data packet returned to interface queries 
+struct UIState {
+    bool hovered = false;  // Cursor is positioned over the component 
+    bool pressed = false;  // Left mouse click is currently held down on the component 
+    bool clicked = false;  // Left mouse click was cleanly released inside the component boundaries this frame 
+    bool focused = false;  // Component currently holds character keyboard typing focus 
+};
+
+class UIContext {
+public:
+    uint32_t hot_id = 0;     // Primitive component index directly under the pointer 
+    uint32_t active_id = 0;  // Primitive component index targeted by a mouse down event 
+    uint32_t focus_id = 0;   // Primitive component index capturing text input focus 
+    uint32_t clicked_id = 0; // Primitive component index registering a valid action click trigger this frame 
+
+    // Core internal system lifecycles
+    void update_system_states(EngineContext* ctx); 
+
+    // ============================================================================
+    // DECLARATIVE IMMEDIATE-MODE UI METHODS
+    // ============================================================================
+    bool Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+        const glm::vec4& bounds, const char* label, float textScale = 24.0f);
+
+    bool Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+        const glm::vec4& trackBounds, float& value);
+
+    void TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+        const glm::vec4& bounds, std::string& text, uint32_t& cursor, float textScale = 24.0f);
+
+    // Inline boolean property access evaluation states 
+    [[nodiscard]] inline bool is_hot(uint32_t id) const noexcept { return id != 0 && hot_id == id; }
+    [[nodiscard]] inline bool is_active(uint32_t id) const noexcept { return id != 0 && active_id == id; }
+    [[nodiscard]] inline bool is_focused(uint32_t id) const noexcept { return id != 0 && focus_id == id; }
+    [[nodiscard]] inline bool is_clicked(uint32_t id) const noexcept { return id != 0 && clicked_id == id; }
+};
+```
+
+// ==========================================
+// FILE: src\Engine\Utils\Utils.hpp
+// ==========================================
+```cpp
+#pragma once
+
+#include <Core.hpp>
+#include "CRC32_64/CRC32_64.hpp"
+#include <chrono>
+
+struct ViewportScale {
+    float scale = 1.0f;
+    glm::vec2 offset{ 0.0f, 0.0f };
+};
+
+class Utils
+{
+public:
+    static bool inRect(glm::vec2 pos, glm::vec2 rectPos, glm::vec2 rectDim)
+    {
+        return glm::all(glm::greaterThanEqual(pos, rectPos)) && glm::all(glm::lessThanEqual(pos, rectPos + rectDim));
+    }
+    static bool inRect(glm::vec2 pos, glm::vec2 objDim, glm::vec2 rectPos, glm::vec2 rectDim)
+    {
+        return glm::all(glm::greaterThanEqual(pos, rectPos)) && glm::all(glm::lessThanEqual(pos, rectPos + rectDim - objDim));
+    }
+    static glm::vec2 lerp2(glm::vec2 a, glm::vec2 b, float c, float distSnapThreshold = -1.0f)
+    {
+        a.x = std::lerp(a.x, b.x, c);
+        a.y = std::lerp(a.y, b.y, c);
+
+        if (std::abs(a.x - b.x) <= distSnapThreshold) a.x = b.x;
+        if (std::abs(a.y - b.y) <= distSnapThreshold) a.y = b.y;
+
+        return a;
+    }
+
+    static std::string timeToDate(double timestamp)
+    {
+        std::string time = "";
+        time += std::to_string(long long(timestamp) / 3600) + ':';
+        timestamp = double(long long(timestamp) % 3600) + (timestamp - (double)long long(timestamp));
+        time += std::to_string(long long(timestamp) / 60) + ':';
+        timestamp = double(long long(timestamp) % 60) + (timestamp - (double)long long(timestamp));
+        time += std::to_string(long long(timestamp));
+
+        return time;
+    }
+
+    static inline ViewportScale ComputeViewportScale(glm::vec2 windowSize, glm::vec2 designSize) {
+        float sx = windowSize.x / designSize.x;
+        float sy = windowSize.y / designSize.y;
+
+        float scale = (std::min)(sx, sy);
+        glm::vec2 scaled = designSize * scale;
+        glm::vec2 offset = (windowSize - scaled) * 0.5f;
+
+        return { scale, offset };
+    }
+
+    static std::string formatTS(uint64_t timestampMs)
+    {
+        using namespace std::chrono;
+
+        system_clock::time_point tp{ milliseconds(timestampMs) };
+
+        std::time_t tt = system_clock::to_time_t(tp);
+
+        std::tm tm{};
+
+#ifdef _WIN32
+        localtime_s(&tm, &tt);   // Windows (thread-safe)
+#else
+        localtime_r(&tt, &tm);   // POSIX (thread-safe)
+#endif
+
+        // Format
+        std::ostringstream oss;
+        oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+
+        return oss.str();
+    }
+};
 
 enum class UIAnchor : uint8_t {
     TopLeft, TopCenter, TopRight,
@@ -2357,149 +2316,6 @@ public:
             return { canvasSize.x - size.x - offset.x, canvasSize.y - size.y - offset.y, size.x, size.y };
         }
         return { offset.x, offset.y, size.x, size.y };
-    }
-};
-```
-
-// ==========================================
-// FILE: src\Engine\UI\UIContext.cpp
-// ==========================================
-```cpp
-#include "UIContext.hpp"
-#include "../Context/EngineContext.hpp"
-#include "../Physics/CollisionEngine.hpp"
-#include <vector>
-
-void UIContext::update_system_states(EngineContext* ctx) {
-    clicked_id = 0; // Clear single-frame click flags
-
-    // 1. Query the unified collision database using the cursor coordinates
-    static std::vector<CollisionResult> scratchpad;
-    scratchpad.clear();
-
-    glm::vec2 mousePos = ctx->input.getMousePosition();
-    ctx->collisionWorld.query_point(mousePos, Layer_None, Layer_UI, scratchpad);
-
-    // 2. Determine the hot element under the mouse cursor
-    hot_id = scratchpad.empty() ? 0 : scratchpad[0].target_id;
-
-    // 3. Update active states based on mouse clicks
-    if (ctx->input.isMouseButtonJustPressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        active_id = hot_id;
-        if (hot_id != focus_id) {
-            focus_id = 0; // Clear input focus if clicking empty space
-        }
-    }
-
-    if (ctx->input.isMouseButtonJustReleased(GLFW_MOUSE_BUTTON_LEFT)) {
-        // Trigger condition matches if the user releases the click inside the same component
-        if (active_id != 0 && active_id == hot_id) {
-            clicked_id = active_id; // Register single-frame execution click
-            focus_id = active_id;   // Assign keyboard typing capture focus
-        }
-        active_id = 0;
-    }
-}
-```
-
-// ==========================================
-// FILE: src\Engine\UI\UIContext.hpp
-// ==========================================
-```cpp
-#pragma once
-#include <cstdint>
-
-class EngineContext;
-
-// Lightweight control state packet returned to the user
-struct UIState {
-    bool hovered = false; // Cursor is over the widget
-    bool pressed = false; // Left mouse is holding down on the widget
-    bool clicked = false; // Left mouse was cleanly released on the widget this frame
-    bool focused = false; // Widget has active text/keyboard focus
-};
-
-class UIContext {
-public:
-    uint32_t hot_id = 0;
-    uint32_t active_id = 0;
-    uint32_t focus_id = 0;
-    uint32_t clicked_id = 0;
-
-    void update_system_states(EngineContext* ctx);
-
-    [[nodiscard]] inline bool is_hot(uint32_t id) const noexcept { return id != 0 && hot_id == id; }
-    [[nodiscard]] inline bool is_active(uint32_t id) const noexcept { return id != 0 && active_id == id; }
-    [[nodiscard]] inline bool is_focused(uint32_t id) const noexcept { return id != 0 && focus_id == id; }
-    [[nodiscard]] inline bool is_clicked(uint32_t id) const noexcept { return id != 0 && clicked_id == id; }
-};
-```
-
-// ==========================================
-// FILE: src\Engine\Utils\Utils.hpp
-// ==========================================
-```cpp
-#pragma once
-
-#include <Core.hpp>
-#include "CRC32_64/CRC32_64.hpp"
-#include <chrono>
-
-class Utils
-{
-public:
-    static bool inRect(glm::vec2 pos, glm::vec2 rectPos, glm::vec2 rectDim)
-    {
-        return glm::all(glm::greaterThanEqual(pos, rectPos)) && glm::all(glm::lessThanEqual(pos, rectPos + rectDim));
-    }
-    static bool inRect(glm::vec2 pos, glm::vec2 objDim, glm::vec2 rectPos, glm::vec2 rectDim)
-    {
-        return glm::all(glm::greaterThanEqual(pos, rectPos)) && glm::all(glm::lessThanEqual(pos, rectPos + rectDim - objDim));
-    }
-    static glm::vec2 lerp2(glm::vec2 a, glm::vec2 b, float c, float distSnapThreshold = -1.0f)
-    {
-        a.x = std::lerp(a.x, b.x, c);
-        a.y = std::lerp(a.y, b.y, c);
-
-        if (std::abs(a.x - b.x) <= distSnapThreshold) a.x = b.x;
-        if (std::abs(a.y - b.y) <= distSnapThreshold) a.y = b.y;
-
-        return a;
-    }
-
-    static std::string timeToDate(double timestamp)
-    {
-        std::string time = "";
-        time += std::to_string(long long(timestamp) / 3600) + ':';
-        timestamp = double(long long(timestamp) % 3600) + (timestamp - (double)long long(timestamp));
-        time += std::to_string(long long(timestamp) / 60) + ':';
-        timestamp = double(long long(timestamp) % 60) + (timestamp - (double)long long(timestamp));
-        time += std::to_string(long long(timestamp));
-
-        return time;
-    }
-
-    static std::string formatTS(uint64_t timestampMs)
-    {
-        using namespace std::chrono;
-
-        system_clock::time_point tp{ milliseconds(timestampMs) };
-
-        std::time_t tt = system_clock::to_time_t(tp);
-
-        std::tm tm{};
-
-#ifdef _WIN32
-        localtime_s(&tm, &tt);   // Windows (thread-safe)
-#else
-        localtime_r(&tt, &tm);   // POSIX (thread-safe)
-#endif
-
-        // Format
-        std::ostringstream oss;
-        oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
-
-        return oss.str();
     }
 };
 ```
@@ -2767,15 +2583,14 @@ private:
 // ==========================================
 ```cpp
 #include <Engine/Engine.hpp>
+#include <Engine/Core/Scene.hpp>
 #include <iostream>
 #include <vector>
 #include <string>
 #include <algorithm>
 
-// Unique Identification Key Enums for Subsystem Queries
+// Unique Identification Key Enums for UI Components
 enum TestIDs : uint32_t {
-    ID_Player = 1,
-    ID_HazardBlock = 2,
     ID_PauseBtn = 101,
     ID_VolumeSld = 102,
     ID_DevSwapBtn = 201,
@@ -2784,8 +2599,132 @@ enum TestIDs : uint32_t {
 };
 
 // ============================================================================
+// GAMEPLAY ENTITIES (DECOUPLED & CALLBACK-DRIVEN)
+// ============================================================================
+
+// 1. Coin Pickup Entity (Trigger Volume - No physical collision pushback)
+class CoinEntity : public Entity2D {
+private:
+    AudioHandle m_pickupSFX;
+
+public:
+    CoinEntity(glm::vec2 pos) {
+        position = pos;
+        size = { 28.0f, 28.0f };
+        isTrigger = true; // Does not block movement
+        layer = CollisionLayer::Layer_TriggerVolume;
+        mask = CollisionLayer::Layer_Player;
+    }
+
+    void onAttach(EngineContext* ctx) {
+        m_pickupSFX = ctx->audioEngine.loadSound(SFX_PATH "click.mp3", false);
+    }
+
+    void onTrigger(const CollisionInfo& trigger, EngineContext* ctx) override {
+        ctx->audioEngine.play(m_pickupSFX, AudioCategory::InteractSFX, false);
+
+        // Update global blackboard score
+        int score = ctx->blackboard.get<int>("score").value_or(0);
+        ctx->blackboard.set("score", score + 100);
+
+        active = false; // Destroy pickup
+    }
+
+    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override {
+        writeBuffer.push_command(15, 0, RectPayload{
+            .dest_rect = { renderPos.x, renderPos.y, size.x, size.y },
+            .color = { 1.0f, 0.84f, 0.0f, 1.0f }, // Gold color
+            .no_texture = true,
+            .is_world_space = true // Automatically subtracts cameraPos!
+            });
+    }
+};
+
+// 2. Dynamic Hazard Entity (Solid Obstacle)
+class HazardEntity : public Entity2D {
+public:
+    HazardEntity(glm::vec2 pos, glm::vec2 vel) {
+        position = pos;
+        size = { 96.0f, 96.0f };
+        velocity = vel;
+        layer = CollisionLayer::Layer_Obstacle;
+        mask = CollisionLayer::Layer_Player | CollisionLayer::Layer_StaticWall;
+    }
+
+    void onUpdate(float dt, EngineContext* ctx) override {
+        // Bounce off world bounds
+        if (position.x <= 0.0f || position.x >= 1800.0f - size.x) velocity.x *= -1.0f;
+        if (position.y <= 0.0f || position.y >= 1200.0f - size.y) velocity.y *= -1.0f;
+    }
+
+    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override {
+        writeBuffer.push_command(10, 0, RectPayload{
+            .dest_rect = { renderPos.x, renderPos.y, size.x, size.y },
+            .color = { 0.75f, 0.15f, 0.15f, 1.0f },
+            .no_texture = true,
+            .is_world_space = true
+            });
+    }
+};
+
+// 3. Player Entity (Kinematic Character Controller)
+class PlayerEntity : public Entity2D {
+private:
+    AudioHandle m_hitSFX;
+    glm::vec4 m_color{ 0.0f, 1.0f, 0.0f, 1.0f };
+    bool m_hasHitThisFrame = false;
+
+public:
+    PlayerEntity(glm::vec2 pos) {
+        position = pos;
+        size = { 64.0f, 64.0f };
+        layer = CollisionLayer::Layer_Player;
+        mask = CollisionLayer::Layer_Obstacle | CollisionLayer::Layer_TriggerVolume;
+    }
+
+    void onAttach(EngineContext* ctx) {
+        m_hitSFX = ctx->audioEngine.loadSound(SFX_PATH "hit.mp3", false);
+    }
+
+    void onUpdate(float dt, EngineContext* ctx) override {
+        velocity = { 0.0f, 0.0f };
+        if (ctx->input.isKeyHeld(GLFW_KEY_W)) velocity.y -= 450.0f;
+        if (ctx->input.isKeyHeld(GLFW_KEY_S)) velocity.y += 450.0f;
+        if (ctx->input.isKeyHeld(GLFW_KEY_A)) velocity.x -= 450.0f;
+        if (ctx->input.isKeyHeld(GLFW_KEY_D)) velocity.x += 450.0f;
+
+        // Clamp to expanded world boundary
+        position.x = glm::clamp(position.x, 0.0f, 1800.0f - size.x);
+        position.y = glm::clamp(position.y, 0.0f, 1200.0f - size.y);
+
+        if (!m_hasHitThisFrame) {
+            m_color = { 0.0f, 1.0f, 0.0f, 1.0f };
+        }
+        m_hasHitThisFrame = false;
+    }
+
+    void onCollision(const CollisionInfo& hit, EngineContext* ctx) override {
+        m_hasHitThisFrame = true;
+        m_color = { 1.0f, 0.2f, 0.2f, 1.0f };
+
+        // Clean modular response: Slide cleanly against solid hazards
+        if (hit.targetLayer & CollisionLayer::Layer_Obstacle) {
+            PhysicsResponse::Slide(position, velocity, hit.manifold);
+        }
+    }
+
+    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override {
+        writeBuffer.push_command(20, 0, RectPayload{
+            .dest_rect = { renderPos.x, renderPos.y, size.x, size.y },
+            .color = m_color,
+            .no_texture = true,
+            .is_world_space = true
+            });
+    }
+};
+
+// ============================================================================
 // LAYER 1: THE INTERCEPTING MODAL OVERLAY (PAUSE MENU)
-// Evaluates: Flow propagation markers, custom styling loops, live volume updates
 // ============================================================================
 class PauseMenuLayer : public IEngineLayer {
 private:
@@ -2803,16 +2742,14 @@ public:
     }
     void onDetach(EngineContext* ctx) override {}
 
-    // --- CRITICAL FLOW PROPAGATION FILTERS ---
-    [[nodiscard]] bool blocksEvents() const noexcept override { return true; } // Stops inputs from leaking downward
-    [[nodiscard]] bool blocksUpdates() const noexcept override { return true; } // Freezes the physics updates below it
+    [[nodiscard]] bool blocksEvents() const noexcept override { return true; }
+    [[nodiscard]] bool blocksUpdates() const noexcept override { return true; }
 
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override {
-        // Intercept alternate key execution paths to discard the layer
         if (std::holds_alternative<KeyEvent>(event)) {
             auto ev = std::get<KeyEvent>(event);
             if (ev.key == GLFW_KEY_P && ev.action == GLFW_PRESS) {
-                ctx->layerStack->deferDetach(this); // Safe extraction outside loop traversal
+                ctx->layerStack->deferDetach(this);
             }
         }
     }
@@ -2820,141 +2757,99 @@ public:
     void update(double dt, EngineContext* ctx) override {}
 
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override {
-        // 1. Alpha screen overlay to darken background game mechanics
         writeBuffer.push_command(800, 0, RectPayload{ .dest_rect = {0, 0, 1200, 805}, .color = {0.0f, 0.0f, 0.0f, 0.65f}, .no_texture = true });
-
-        // 2. Render Modal backplate background frame [cite: 231]
         writeBuffer.push_command(810, 0, RectPayload{ .dest_rect = m_panelBounds, .color = {0.11f, 0.11f, 0.14f, 1.0f}, .no_texture = true });
 
-        // 3. Interactive Resume Button Execution Block
-        UIState btnState = UI::Button(ctx, ID_PauseBtn, m_resumeBtn);
-        if (btnState.clicked) {
+        if (ctx->ui.Button(writeBuffer, ctx, ID_PauseBtn, m_resumeBtn, "RESUME WORLD", 24.0f)) {
             ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX, false);
-            ctx->layerStack->deferDetach(this); // Safe unmount trigger
+            ctx->layerStack->deferDetach(this);
             return;
         }
 
-        // Custom styling managed completely by you based on returned structural state flags
-        glm::vec4 activeBtnColor = btnState.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } :
-            btnState.hovered ? glm::vec4{ 0.25f, 0.28f, 0.35f, 1.0f } : glm::vec4{ 0.18f, 0.19f, 0.22f, 1.0f };
-        writeBuffer.push_command(820, 0, ButtonPayload{
-            .dest_rect = m_resumeBtn, .idle_color = activeBtnColor, .hover_color = activeBtnColor,
-            .click_color = activeBtnColor, .text_color = {1,1,1,1}, .text_scale = 0.35f, // Safe scalar fractional scale [cite: 34]
-            .is_hovered = btnState.hovered, .is_pressed = btnState.pressed, .no_texture = true, .label = "RESUME WORLD"
-            });
+        ctx->ui.Slider(writeBuffer, ctx, ID_VolumeSld, m_sliderTrack, m_localVolCache);
+        ctx->audioEngine.setCategoryVolume(AudioCategory::Master, m_localVolCache);
 
-        // 4. Interactive Volume Slider Processing Block
-        UIState sldState = UI::Slider(ctx, ID_VolumeSld, m_sliderTrack, m_localVolCache);
-        ctx->audioEngine.setCategoryVolume(AudioCategory::Master, m_localVolCache); // Dynamic live runtime stream modification! [cite: 41]
-
-        writeBuffer.push_command(820, 0, SliderPayload{
-            .track_rect = m_sliderTrack, .track_color = {0.06f, 0.06f, 0.08f, 1.0f},
-            .knob_color = sldState.pressed ? glm::vec4{0.1f, 0.45f, 0.75f, 1.0f} : glm::vec4{0.45f, 0.45f, 0.5f, 1.0f},
-            .knob_size = {16, 30}, .normalized_value = m_localVolCache, .use_textures = false
-            });
-
-        TextPayload txt; txt.color = { 0.8f, 0.8f, 0.85f, 1.0f }; txt.scale = 0.3f; txt.position = { m_panelBounds.x + 35.0f, m_panelBounds.y + 140.0f };
+        TextPayload txt;
+        txt.color = { 0.8f, 0.8f, 0.85f, 1.0f };
+        txt.scale = 22.0f;
+        txt.position = { m_panelBounds.x + 20.0f, m_panelBounds.y + 200.0f };
         snprintf(txt.text_content, sizeof(txt.text_content), "Master Mixer Volume: %d%%", static_cast<int>(m_localVolCache * 100.0f));
         writeBuffer.push_command(830, 0, txt);
     }
 };
 
 // ============================================================================
-// LAYER 2: THE GAMEPLAY SIMULATION WORLD
-// Evaluates: Fixed-Timestep loops, input polling, cache-dense box physics
+// LAYER 2: THE GAMEPLAY SIMULATION WORLD (SCENE2D POWERED)
 // ============================================================================
 class GameplaySimulationLayer : public IEngineLayer {
 private:
-    glm::vec2 m_playerPos{ 200.0f, 300.0f }, m_playerSize{ 64.0f, 64.0f };
-    glm::vec4 m_playerColor{ 0.0f, 1.0f, 0.0f, 1.0f };
-
-    glm::vec4 m_hazardBounds{ 600.0f, 200.0f, 96.0f, 96.0f };
-    glm::vec2 m_hazardVelocity{ 320.0f, 240.0f };
-
-    bool m_hasTriggeredHit{ false };
-    AudioHandle m_hitSFX;
-    std::vector<CollisionResult> m_physicsScratchpad;
+    Scene2D m_scene;
+    PlayerEntity* m_player = nullptr;
 
 public:
     void onAttach(EngineContext* ctx) override {
-        m_hitSFX = ctx->audioEngine.loadSound(SFX_PATH "hit.mp3", false);
-            m_physicsScratchpad.reserve(16);
+        m_scene.clear();
+        ctx->blackboard.set("score", 0);
+
+        // 1. Spawn Player Entity
+        m_player = m_scene.spawn<PlayerEntity>(glm::vec2{ 300.0f, 300.0f });
+        m_player->onAttach(ctx);
+
+        // 2. Spawn Dynamic Hazard Obstacles
+        m_scene.spawn<HazardEntity>(glm::vec2{ 700.0f, 200.0f }, glm::vec2{ 320.0f, 240.0f });
+        m_scene.spawn<HazardEntity>(glm::vec2{ 1200.0f, 600.0f }, glm::vec2{ -280.0f, 310.0f });
+
+        // 3. Spawn Trigger Pickups
+        for (int i = 0; i < 8; ++i) {
+            auto* coin = m_scene.spawn<CoinEntity>(glm::vec2{ 200.0f + i * 180.0f, 150.0f + (i % 3) * 220.0f });
+            coin->onAttach(ctx);
+        }
     }
-    void onDetach(EngineContext* ctx) override {}
+
+    void onDetach(EngineContext* ctx) override {
+        m_scene.clear();
+    }
 
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override {
-        // Intercept edge-triggered key press to instantiate modal overlay scene
         if (std::holds_alternative<KeyEvent>(event)) {
             auto ev = std::get<KeyEvent>(event);
-                if (ev.key == GLFW_KEY_P && ev.action == GLFW_PRESS) {
-                    // Instantiates a Pause Menu directly above this layer safely at the frame boundary
-                    ctx->layerStack->deferAttach(std::make_unique<PauseMenuLayer>());
-                }
+            if (ev.key == GLFW_KEY_P && ev.action == GLFW_PRESS) {
+                ctx->layerStack->deferAttach(std::make_unique<PauseMenuLayer>());
+            }
         }
     }
 
     void update(double dt, EngineContext* ctx) override {
-        const float fDt = static_cast<float>(dt);
+        // Automatically moves entities, detects collisions, & fires onCollision/onTrigger callbacks
+        m_scene.fixedUpdate(dt, ctx);
 
-        // 1. Hardware State Input Polking (Buttery Smooth Movement) [cite: 21]
-        glm::vec2 inputVector{ 0.0f, 0.0f };
-        if (ctx->input.isKeyHeld(GLFW_KEY_W)) inputVector.y -= 1.0f;
-            if (ctx->input.isKeyHeld(GLFW_KEY_S)) inputVector.y += 1.0f;
-                if (ctx->input.isKeyHeld(GLFW_KEY_A)) inputVector.x -= 1.0f;
-                    if (ctx->input.isKeyHeld(GLFW_KEY_D)) inputVector.x += 1.0f;
-
-                        if (glm::length(inputVector) > 0.0f) {
-                            m_playerPos += glm::normalize(inputVector) * 450.0f * fDt;
-                        }
-        m_playerPos.x = glm::clamp(m_playerPos.x, 0.0f, 1200.0f - m_playerSize.x);
-            m_playerPos.y = glm::clamp(m_playerPos.y, 0.0f, 805.0f - m_playerSize.y);
-
-            // 2. Physics Update: Move the kinematic Hazard Box [cite: 143]
-            m_hazardBounds.x += m_hazardVelocity.x * fDt;
-        m_hazardBounds.y += m_hazardVelocity.y * fDt;
-
-        // Bounce hazard elements cleanly off hard window limits [cite: 23-24]
-        if (m_hazardBounds.x <= 0.0f || m_hazardBounds.x >= 1200.0f - m_hazardBounds.z) m_hazardVelocity.x *= -1.0f;
-        if (m_hazardBounds.y <= 0.0f || m_hazardBounds.y >= 805.0f - m_hazardBounds.w)  m_hazardVelocity.y *= -1.0f;
-
-        // 3. Bidirectional AABB Collision Sweep [cite: 24-25]
-        m_physicsScratchpad.clear();
-        glm::vec4 currentBox{ m_playerPos.x, m_playerPos.y, m_playerSize.x, m_playerSize.y };
-            ctx->collisionWorld.query_aabb(currentBox, CollisionLayer::Layer_Player, CollisionLayer::Layer_Obstacle, m_physicsScratchpad);
-
-            if (!m_physicsScratchpad.empty()) {
-                if (!m_hasTriggeredHit) {
-                    ctx->audioEngine.play(m_hitSFX, AudioCategory::GameplaySFX, false);
-                        m_hasTriggeredHit = true;
-                }
-                m_playerColor = glm::vec4{ 1.0f, 0.15f, 0.15f, 1.0f }; // Flash Red [cite: 27]
-            }
-            else {
-                m_hasTriggeredHit = false;
-                m_playerColor = glm::vec4{ 0.0f, 1.0f, 0.0f, 1.0f };  // Default Green [cite: 25]
-            }
+        // Smooth camera follow target in world space
+        if (m_player) {
+            glm::vec2 targetCam = m_player->position - glm::vec2(600.0f, 402.5f);
+            ctx->cameraPos = Utils::lerp2(ctx->cameraPos, targetCam, 0.1f);
+        }
     }
 
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override {
-        // Register simulation colliders back into the spatial hash matrix for the incoming frame tick
-        ctx->collisionWorld.register_collider(ID_HazardBlock, m_hazardBounds, CollisionLayer::Layer_Obstacle);
+        // Automatically registers colliders & interpolates rendering positions
+        m_scene.populateRenderStream(writeBuffer, ctx);
 
-            // Serialize Drawing Instructions down the zero-allocation arena [cite: 28-32]
-            writeBuffer.push_command(10, 0, RectPayload{ .dest_rect = m_hazardBounds, .color = {0.55f, 0.12f, 0.12f, 1.0f}, .no_texture = true });
-            writeBuffer.push_command(20, 0, RectPayload{ .dest_rect = {m_playerPos.x, m_playerPos.y, m_playerSize.x, m_playerSize.y}, .color = m_playerColor, .no_texture = true });
+        // HUD Score Display (Fixed Screen-Space UI)
+        int score = ctx->blackboard.get<int>("score").value_or(0);
+        TextPayload scoreTxt;
+        scoreTxt.color = { 1.0f, 0.9f, 0.2f, 1.0f };
+        scoreTxt.scale = 26.0f;
+        scoreTxt.position = { 30.0f, 30.0f };
+        snprintf(scoreTxt.text_content, sizeof(scoreTxt.text_content), "Score: %d", score);
+        writeBuffer.push_command(500, 0, scoreTxt);
     }
 };
 
 // ============================================================================
 // LAYER 3: THE DEPLOYED DEVELOPER DASHBOARD INTERFACE
-// Evaluates: Advanced Deferred Stack Commands Queue, character streams, textboxes
 // ============================================================================
 class DevDashboardLayer : public IEngineLayer {
 private:
-    glm::vec4 m_swapBtnBounds{ 30.0f, 720.0f, 200.0f, 45.0f };
-    glm::vec4 m_killBtnBounds{ 250.0f, 720.0f, 200.0f, 45.0f };
-    glm::vec4 m_txtBoxBounds{ 470.0f, 720.0f, 250.0f, 45.0f };
-
     std::string m_profileName{ "Yui Okusora" };
     uint32_t m_txtCursor{ static_cast<uint32_t>(m_profileName.size()) };
     AudioHandle m_clickSFX;
@@ -2969,60 +2864,43 @@ public:
     void update(double dt, EngineContext* ctx) override {}
 
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override {
-        // Force View Matrix Reset to ensure interface coordinate metrics remain perfectly anchored [cite: 32]
+        glm::vec2 canvas{ 1200.0f, 805.0f };
+
         writeBuffer.push_command(799, 0, CameraPayload{ .position = {0,0}, .zoom = 1.0f });
 
-            // Background panel ribbon spacer container decoration
-            writeBuffer.push_command(880, 0, RectPayload{ .dest_rect = {0, 700, 1200, 105}, .color = {0.05f, 0.05f, 0.07f, 1.0f}, .no_texture = true });
+        float barHeight = 105.0f;
+        glm::vec4 dynamicRibbon{ 0.0f, canvas.y - barHeight, canvas.x, barHeight };
+        writeBuffer.push_command(880, 0, RectPayload{ .dest_rect = dynamicRibbon, .color = {0.05f, 0.05f, 0.07f, 1.0f}, .no_texture = true });
 
-        // 1. Core Dev Dashboard Text Information Overlays [cite: 33-35]
-        TextPayload info; info.color = { 0.5f, 0.7f, 0.9f, 1.0f }; info.scale = 0.32f; info.position = { 30.f, 30.f };
-            snprintf(info.text_content, sizeof(info.text_content), "Active Stack Size: %zu | Mouse Screen Coords: {%.1f, %.1f}",
-                ctx->layerStack->getLayers().size(), ctx->input.getMousePosition().x, ctx->input.getMousePosition().y);
+        glm::vec4 dynamicSwapBounds = UIAnchorEngine::CalculateBounds(canvas, glm::vec2(200, 45), glm::vec2(30, 30), UIAnchor::BottomLeft);
+        glm::vec4 dynamicKillBounds = UIAnchorEngine::CalculateBounds(canvas, glm::vec2(200, 45), glm::vec2(250, 30), UIAnchor::BottomLeft);
+        glm::vec4 dynamicTxtBounds = UIAnchorEngine::CalculateBounds(canvas, glm::vec2(250, 45), glm::vec2(470, 30), UIAnchor::BottomLeft);
+
+        TextPayload info;
+        info.color = { 0.5f, 0.7f, 0.9f, 1.0f };
+        info.scale = 22.0f;
+        info.position = { 30.f, 35.f };
+        snprintf(info.text_content, sizeof(info.text_content), "Active Stack Size: %zu | Mouse Screen Coords: {%.1f, %.1f}",
+            ctx->layerStack->getLayers().size(), ctx->input.getMousePosition().x, ctx->input.getMousePosition().y);
         writeBuffer.push_command(890, 0, info);
 
-        info.position = { 30.f, 60.f }; info.color = { 0.8f, 0.8f, 0.4f, 1.0f };
+        info.position = { 30.f, 70.f };
+        info.color = { 0.8f, 0.8f, 0.4f, 1.0f };
         snprintf(info.text_content, sizeof(info.text_content), "Active Dev Profile: %s", m_profileName.c_str());
         writeBuffer.push_command(890, 0, info);
 
-        // 2. Button A: Trigger Defer Swap index operations [cite: 36]
-        UIState swapState = UI::Button(ctx, ID_DevSwapBtn, m_swapBtnBounds);
-            if (swapState.clicked) {
-                ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX, false);
-                    // Safe Pointer Pointer swapping! Inverts ordering of lower system elements without iterator invalidation crashes
-                    if (ctx->layerStack->getLayers().size() >= 2) {
-                        ctx->layerStack->deferSwap(0, 1);
-                    }
-            }
-        writeBuffer.push_command(900, 0, ButtonPayload{
-            .dest_rect = m_swapBtnBounds, .idle_color = {0.12f, 0.25f, 0.15f, 1.0f}, .hover_color = {0.2f, 0.4f, 0.25f, 1.0f},
-            .click_color = {0.08f, 0.18f, 0.1f, 1.0f}, .text_color = {1,1,1,1}, .text_scale = 0.32f,
-            .is_hovered = swapState.hovered, .is_pressed = swapState.pressed, .no_texture = true, .label = "SWAP BASE LAYERS"
-            });
+        if (ctx->ui.Button(writeBuffer, ctx, ID_DevSwapBtn, dynamicSwapBounds, "SWAP BASE LAYERS", 24.0f)) {
+            ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX, false);
+            if (ctx->layerStack->getLayers().size() >= 2) { ctx->layerStack->deferSwap(0, 1); }
+        }
 
-        // 3. Button B: Structural Layer Extraction [cite: 36]
-        UIState killState = UI::Button(ctx, ID_DevKillBtn, m_killBtnBounds);
-            if (killState.clicked) {
-                ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX, false);
-                    ctx->layerStack->deferDetach(this); // Safe complete frame extraction!
-                return;
-            }
-        writeBuffer.push_command(900, 0, ButtonPayload{
-            .dest_rect = m_killBtnBounds, .idle_color = {0.28f, 0.12f, 0.12f, 1.0f}, .hover_color = {0.45f, 0.18f, 0.18f, 1.0f},
-            .click_color = {0.18f, 0.08f, 0.08f, 1.0f}, .text_color = {1,1,1,1}, .text_scale = 0.32f,
-            .is_hovered = killState.hovered, .is_pressed = killState.pressed, .no_texture = true, .label = "DETACH SELF"
-            });
+        if (ctx->ui.Button(writeBuffer, ctx, ID_DevKillBtn, dynamicKillBounds, "DETACH SELF", 24.0f)) {
+            ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX, false);
+            ctx->layerStack->deferDetach(this);
+            return;
+        }
 
-        // 4. Interactive Unicode Input Textbox Layout
-        UIState boxState = UI::TextBox(ctx, ID_DevTxtBox, m_txtBoxBounds, m_profileName, m_txtCursor);
-
-            TextBoxPayload tb{
-                .bounds = m_txtBoxBounds, .background_color = {0.02f, 0.02f, 0.03f, 1.0f},
-                .border_color = boxState.focused ? glm::vec4{0.1f, 0.45f, 0.75f, 1.0f} : glm::vec4{0.2f, 0.22f, 0.26f, 1.0f},
-                .text_color = {0.95f, 0.95f, 1.0f, 1.0f}, .cursor_index = m_txtCursor, .text_scale = 0.32f, .is_focused = boxState.focused
-        };
-        snprintf(tb.content, sizeof(tb.content), "%s", m_profileName.c_str());
-            writeBuffer.push_command(900, 0, tb);
+        ctx->ui.TextBox(writeBuffer, ctx, ID_DevTxtBox, dynamicTxtBounds, m_profileName, m_txtCursor, 24.0f);
     }
 };
 
@@ -3032,26 +2910,21 @@ public:
 int main() {
     try {
         std::cout << "[Engine Verification Run] Initiating testing configuration blueprints...\n";
-            Application app("Horizon Engine v2.0 - Complete Subsystem Suite", 1200, 805);
-            EngineContext& ctx = app.getContext();
+        Application app("Horizon Engine v2.0 - Complete Subsystem Suite", 1200, 805);
+        EngineContext& ctx = app.getContext();
 
-            // Load baseline continuous ambient audio pipeline
-            AudioHandle bgmTrack = ctx.audioEngine.loadSound(SFX_PATH "bgm.mp3", true);
-            ctx.audioEngine.play(bgmTrack, AudioCategory::Music, true);
+        AudioHandle bgmTrack = ctx.audioEngine.loadSound(SFX_PATH "bgm.mp3", true);
+        ctx.audioEngine.play(bgmTrack, AudioCategory::Music, true);
 
-            // Mount the comprehensive multi-layered structure
-            // Layer 0: Gameplay Simulation Loop 
-            ctx.layerStack->pushLayer(std::make_unique<GameplaySimulationLayer>(), &ctx);
+        ctx.layerStack->pushLayer(std::make_unique<GameplaySimulationLayer>(), &ctx);
+        ctx.layerStack->pushLayer(std::make_unique<DevDashboardLayer>(), &ctx);
 
-            // Layer 1: Persistent Topmost Developer Panel Layout
-            ctx.layerStack->pushLayer(std::make_unique<DevDashboardLayer>(), &ctx);
-
-            std::cout << "[Engine Verification Run] Bootstrapping Complete. Activating worker cores.\n";
-            app.run();
+        std::cout << "[Engine Verification Run] Bootstrapping Complete. Activating worker cores.\n";
+        app.run();
     }
     catch (const std::exception& e) {
         std::cerr << "[Fatal Core Halt]: " << e.what() << "\n";
-            return -1;
+        return -1;
     }
     return 0;
 }

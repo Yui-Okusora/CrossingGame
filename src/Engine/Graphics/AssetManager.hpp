@@ -1,5 +1,5 @@
 #pragma once
-#include "../Graphics/RenderCommands.hpp"
+#include "../Graphics/RenderStream.hpp"
 #include <vector>
 #include <unordered_map>
 #include <string>

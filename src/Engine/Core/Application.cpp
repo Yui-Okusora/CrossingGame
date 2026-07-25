@@ -2,11 +2,14 @@
 #include "Processor.hpp"
 #include "Layer.hpp"
 #include <algorithm>
+#include <iostream>
 
 Application::Application(const std::string& title, int w, int h) {
     if (!glfwInit()) throw std::runtime_error("GLFW initialization failed.");
 
-    WindowSpecs specs{ .title = title, .width = w, .height = h, .resizable = true, .fullscreen = false, .vSync = true, .fps = 60 };
+    m_ctx.startTimePoint = std::chrono::steady_clock::now();
+
+    WindowSpecs specs{ .title = title, .width = w, .height = h, .resizable = true, .fullscreen = false, .vSync = false, .fps = 60 };
     m_ctx.window = std::make_shared<Window>(specs);
     m_ctx.window->create(&m_ctx);
 
@@ -72,13 +75,22 @@ void Application::run() {
 
         m_gl2dRenderer.updateWindowMetrics((int)fbSize.x, (int)fbSize.y);
 
+        const glm::vec2 DESIGN_RESOLUTION = { 1200.0f, 805.0f };
+        float sx = fbSize.x / DESIGN_RESOLUTION.x;
+        float sy = fbSize.y / DESIGN_RESOLUTION.y;
+
+        float scale = std::min(sx, sy); // Pick the restrictive bounding aspect axis
+        glm::vec2 scaledCanvas = DESIGN_RESOLUTION * scale;
+
+        // Store the final computed transform directly into m_ctx so the input thread 
+        // can access it instantly for back-mapping clicks!
+        m_ctx.currentViewport.scale = scale;
+        m_ctx.currentViewport.offset = (fbSize - scaledCanvas) * 0.5f;
+
         RenderData& renderData = m_ctx.renderBuffer.getReadBuffer();
 
         m_gl2dRenderer.clearScreen({ 0, 0, 1, 1 }); // Clear frame baseline color
 
-        // High-Speed Sorting Phase: Groups commands by layer visibility depth first, 
-        // then sub-groups by texture/material key. This groups identical resources together 
-        // automatically so gl2d can merge geometries into minimal draw calls.
         std::sort(renderData.commands.begin(), renderData.commands.end(),
             [](RenderCommand a, RenderCommand b) noexcept {
                 if (a.layer_depth != b.layer_depth) {
@@ -95,8 +107,6 @@ void Application::run() {
         // through a flat vector and fires function delegates blindly across continuous memory vectors.
         for (const auto& cmd : renderData.commands) {
             if (cmd.execute) {
-                m_gl2dRenderer.setCamera(m_gl2dRenderer.currentCamera);
-
                 // Dynamically resolve the absolute stable position inside the raw memory stream
                 const void* resolved_payload = &renderData.payload_arena[cmd.payload_offset];
 
@@ -106,8 +116,6 @@ void Application::run() {
         }
 
         m_gl2dRenderer.flush(); // Consolidate batch arrays and issue drawing hooks to the GPU
-
-        m_ctx.renderBuffer.releaseReadBuffer();
 
         m_ctx.window->update();
     }

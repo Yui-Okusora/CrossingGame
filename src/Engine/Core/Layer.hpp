@@ -1,5 +1,5 @@
 #pragma once
-#include "../Graphics/RenderCommands.hpp"
+#include "../Graphics/RenderStream.hpp"
 #include "../System/EventSystem.hpp"
 #include <memory>
 #include <vector>

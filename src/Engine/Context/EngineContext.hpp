@@ -1,11 +1,12 @@
 #pragma once
 #include "../System/Window.hpp"
 #include "../System/AudioEngine.hpp"
-#include "../Graphics/RenderCommands.hpp"
+#include "../Graphics/RenderStream.hpp"
 #include "../System/EventSystem.hpp"
 #include "../Graphics/AssetManager.hpp"
 #include "../Physics/CollisionEngine.hpp"
 #include "../UI/UIContext.hpp"
+#include "../Utils/Utils.hpp"
 #include <atomic>
 #include <any>
 #include <string>
@@ -133,18 +134,28 @@ public:
     InputState input;
     CollisionEngine collisionWorld;
     UIContext ui;
-    DoubleBuffer<RenderData> renderBuffer;
+    TripleBuffer<RenderData> renderBuffer;
+
+    ViewportScale currentViewport;
 
     std::atomic<float> scaleFactorX{ 1.0f };
     std::atomic<float> scaleFactorY{ 1.0f };
     std::atomic<float> fbWidth{ 1200.0f };
     std::atomic<float> fbHeight{ 805.0f };
-
     std::atomic<float> physicsAlpha{ 0.0f };
+
+    glm::vec2 cameraPos{ 0.0f, 0.0f };
+
+    std::chrono::time_point<std::chrono::steady_clock> startTimePoint;
 
     gl2d::Font globalFont;
     std::unique_ptr<LayerStack> layerStack;
 
     EngineContext();
     ~EngineContext();
+
+    [[nodiscard]] inline double getTime() const noexcept {
+        auto currentTimePoint = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(currentTimePoint - startTimePoint).count();
+    }
 };

@@ -4,6 +4,11 @@
 #include "CRC32_64/CRC32_64.hpp"
 #include <chrono>
 
+struct ViewportScale {
+    float scale = 1.0f;
+    glm::vec2 offset{ 0.0f, 0.0f };
+};
+
 class Utils
 {
 public:
@@ -38,6 +43,17 @@ public:
         return time;
     }
 
+    static inline ViewportScale ComputeViewportScale(glm::vec2 windowSize, glm::vec2 designSize) {
+        float sx = windowSize.x / designSize.x;
+        float sy = windowSize.y / designSize.y;
+
+        float scale = (std::min)(sx, sy);
+        glm::vec2 scaled = designSize * scale;
+        glm::vec2 offset = (windowSize - scaled) * 0.5f;
+
+        return { scale, offset };
+    }
+
     static std::string formatTS(uint64_t timestampMs)
     {
         using namespace std::chrono;
@@ -59,5 +75,48 @@ public:
         oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
 
         return oss.str();
+    }
+};
+
+enum class UIAnchor : uint8_t {
+    TopLeft, TopCenter, TopRight,
+    LeftCenter, Center, RightCenter,
+    BottomLeft, BottomCenter, BottomRight
+};
+
+class UIAnchorEngine {
+public:
+    static inline glm::vec4 CalculateBounds(glm::vec2 canvasSize, glm::vec2 size, glm::vec2 offset, UIAnchor anchor) noexcept {
+        switch (anchor) {
+        case UIAnchor::TopLeft:
+            return { offset.x, offset.y, size.x, size.y };
+
+        case UIAnchor::TopCenter:
+            return { (canvasSize.x * 0.5f) - (size.x * 0.5f) + offset.x, offset.y, size.x, size.y };
+
+        case UIAnchor::TopRight:
+            return { canvasSize.x - size.x - offset.x, offset.y, size.x, size.y };
+
+        case UIAnchor::LeftCenter:
+            return { offset.x, (canvasSize.y * 0.5f) - (size.y * 0.5f) + offset.y, size.x, size.y };
+
+        case UIAnchor::Center:
+            return { (canvasSize.x * 0.5f) - (size.x * 0.5f) + offset.x,
+                     (canvasSize.y * 0.5f) - (size.y * 0.5f) + offset.y, size.x, size.y };
+
+        case UIAnchor::RightCenter:
+            return { canvasSize.x - size.x - offset.x, (canvasSize.y * 0.5f) - (size.y * 0.5f) + offset.y, size.x, size.y };
+
+        case UIAnchor::BottomLeft:
+            return { offset.x, canvasSize.y - size.y - offset.y, size.x, size.y };
+
+        case UIAnchor::BottomCenter:
+            // FIXED: Now computes horizontal symmetry paired with bottom-edge vertical margins
+            return { (canvasSize.x * 0.5f) - (size.x * 0.5f) + offset.x, canvasSize.y - size.y - offset.y, size.x, size.y };
+
+        case UIAnchor::BottomRight:
+            return { canvasSize.x - size.x - offset.x, canvasSize.y - size.y - offset.y, size.x, size.y };
+        }
+        return { offset.x, offset.y, size.x, size.y };
     }
 };
