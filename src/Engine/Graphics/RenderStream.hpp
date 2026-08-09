@@ -13,16 +13,18 @@ struct TextureHandle { uint32_t id = 0; };
 using RenderExecutionFn = void(*)(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx); 
 
 struct RenderCommand {
-int32_t layer_depth; 
+    int32_t stack_index;
+    int32_t layer_depth; 
     uint32_t sorting_key; 
-    RenderExecutionFn execute; 
     uint32_t payload_offset; 
+    RenderExecutionFn execute; 
 };
 
 struct RenderData {
     std::vector<RenderCommand> commands; 
     std::vector<uint8_t> payload_arena; 
     float physicsAlpha = 0.0f;
+    int32_t current_stack_index = 0;
 
     RenderData();
     ~RenderData();
@@ -45,7 +47,13 @@ struct RenderData {
         CleanType* allocated_space = reinterpret_cast<CleanType*>(&payload_arena[current_offset]); 
         new (allocated_space) CleanType(std::forward<T>(payloadInstance)); 
 
-        commands.push_back(RenderCommand{ depth, sorting_key, &CleanType::Execute, static_cast<uint32_t>(current_offset) }); 
+        commands.push_back(RenderCommand{
+            current_stack_index,
+            depth,
+            sorting_key,
+            static_cast<uint32_t>(current_offset),
+            &CleanType::Execute
+            });
     }
 };
 

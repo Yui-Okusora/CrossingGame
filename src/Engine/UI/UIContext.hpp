@@ -22,8 +22,11 @@ public:
     uint32_t focus_id = 0;   // Primitive component index capturing text input focus 
     uint32_t clicked_id = 0; // Primitive component index registering a valid action click trigger this frame 
 
+    bool input_enabled = true;
+
     // Core internal system lifecycles
     void update_system_states(EngineContext* ctx); 
+
 
     // ============================================================================
     // DECLARATIVE IMMEDIATE-MODE UI METHODS

@@ -45,7 +45,7 @@ add_executable (CrossingGame
 
     # Mathematical Utilities
     "src/Engine/Utils/CRC32_64/CRC32_64.cpp"
- "src/Game/Layers/TestSuiteLayers.cpp" "src/Engine/Graphics/RenderStream.cpp")
+  "src/Engine/Graphics/RenderStream.cpp" "src/Game/Layers/MainMenu.cpp" "src/Game/Layers/Gameplay.cpp" "src/Game/Layers/HUD.cpp" "src/Game/Layers/PauseMenu.cpp" "src/Game/Layers/SaveLoadLayer.cpp" "src/Game/Layers/SettingsLayer.cpp" "src/Game/Layers/WinLoseLayer.cpp")
 
 target_include_directories(CrossingGame PRIVATE include/ src/)
 

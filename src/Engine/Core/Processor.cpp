@@ -78,7 +78,7 @@ void Processor::operator()() {
             }
         }
 
-        // 4. Fixed Timestep Physics Simulation Loop [cite: 206-209]
+        // 4. Fixed Timestep Physics Simulation Loop
         while (accumulator >= timestep) {
             for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
                 if ((*it)->isSuspended()) continue;
@@ -95,13 +95,34 @@ void Processor::operator()() {
 
         writeBuffer.physicsAlpha = static_cast<float>(accumulator / timestep);
 
-        for (auto& layer : layers) {
-            if (layer->isVisible()) { // Skips rendering automatically if hidden/suspended
-                layer->populateRenderStream(writeBuffer, m_ctx);
+        // --- PASS A: Calculate input permission top-to-bottom ---
+        std::vector<bool> layerInputEnabled(layers.size(), true);
+        bool isBlocked = false;
+
+        for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
+            if (isBlocked) {
+                layerInputEnabled[i] = false; // Block layers underneath
+            }
+            else {
+                layerInputEnabled[i] = !layers[i]->isSuspended();
+                if (layers[i]->isVisible() && layers[i]->blocksEvents()) {
+                    isBlocked = true; // Block all layers below this one
+                }
             }
         }
 
-        // 5. Atomic pointer swap across thread boundary [cite: 1112]
+        // --- PASS B: Populate render stream bottom-to-top ---
+        for (size_t i = 0; i < layers.size(); ++i) {
+            auto& layer = layers[i];
+            if (layer->isVisible()) {
+                writeBuffer.current_stack_index = static_cast<int32_t>(i); // Set layer stack level
+                m_ctx->ui.input_enabled = layerInputEnabled[i];
+                layer->populateRenderStream(writeBuffer, m_ctx);
+            }
+        }
+        m_ctx->ui.input_enabled = true; // Reset default state
+
+        // 6. Atomic pointer swap across thread boundary
         m_ctx->renderBuffer.swap();
 
         std::this_thread::sleep_for(std::chrono::microseconds(200));

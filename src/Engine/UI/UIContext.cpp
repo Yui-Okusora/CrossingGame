@@ -20,7 +20,9 @@ void UIContext::update_system_states(EngineContext* ctx) {
     };
 
     ctx->collisionWorld.query_point(virtualMouse, Layer_None, Layer_UI, scratchpad);
-    hot_id = scratchpad.empty() ? 0 : scratchpad[0].targetId; // Updated to camelCase targetId
+
+    // Pick the top-most registered collider (last element added)
+    hot_id = scratchpad.empty() ? 0 : scratchpad.back().targetId;
 
     if (ctx->input.isMouseButtonJustPressed(GLFW_MOUSE_BUTTON_LEFT)) {
         active_id = hot_id;
@@ -37,7 +39,11 @@ void UIContext::update_system_states(EngineContext* ctx) {
 }
 
 bool UIContext::Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, const char* label, float textScale) {
-    ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
+    // Only register UI colliders if input is enabled for this layer
+    if (input_enabled) {
+        ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
+    }
+
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
 
     glm::vec4 activeColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } :
@@ -51,11 +57,19 @@ bool UIContext::Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         snprintf(txt.text_content, sizeof(txt.text_content), "%s", label);
         writeBuffer.push_command(910, 0, txt);
     }
+
+    if (state.clicked) {
+        clicked_id = 0; // Consume click event so lower layers cannot receive it
+    }
+
     return state.clicked;
 }
 
 bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& value) {
-    ctx->collisionWorld.register_collider(id, trackBounds, Layer_UI);
+    if (input_enabled) {
+        ctx->collisionWorld.register_collider(id, trackBounds, Layer_UI);
+    }
+
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
 
     if (state.pressed) {
@@ -74,13 +88,15 @@ bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
 }
 
 void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, std::string& text, uint32_t& cursor, float textScale) {
-    ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
+    if (input_enabled) {
+        ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
+    }
+
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
 
     static uint32_t lastFocusedId = 0;
     static double nextBackspaceTime = 0.0;
 
-    // Reset backspace state if focus shifts to a different widget
     if (focus_id != lastFocusedId) {
         lastFocusedId = focus_id;
         nextBackspaceTime = 0.0;
@@ -95,8 +111,8 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
             }
         }
 
-        constexpr double INITIAL_DELAY = 0.40; // 400ms delay before repeat starts
-        constexpr double REPEAT_RATE = 0.04;   // 40ms interval between deletions (~25 chars/sec)
+        constexpr double INITIAL_DELAY = 0.40;
+        constexpr double REPEAT_RATE = 0.04;
 
         if (ctx->input.isKeyJustPressed(GLFW_KEY_BACKSPACE)) {
             if (cursor > 0) {

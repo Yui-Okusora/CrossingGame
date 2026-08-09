@@ -12,6 +12,7 @@ void RenderData::reset() {
     commands.clear(); 
     payload_arena.clear(); 
     physicsAlpha = 0.0f;
+    current_stack_index = 0;
 }
 
 void ClearScreenPayload::Execute(gl2d::Renderer2D& renderer, const void* payload, EngineContext* ctx) {

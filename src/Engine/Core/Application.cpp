@@ -79,7 +79,7 @@ void Application::run() {
         float sx = fbSize.x / DESIGN_RESOLUTION.x;
         float sy = fbSize.y / DESIGN_RESOLUTION.y;
 
-        float scale = std::min(sx, sy); // Pick the restrictive bounding aspect axis
+        float scale = (std::min)(sx, sy); // Pick the restrictive bounding aspect axis
         glm::vec2 scaledCanvas = DESIGN_RESOLUTION * scale;
 
         // Store the final computed transform directly into m_ctx so the input thread 
@@ -92,10 +92,16 @@ void Application::run() {
         m_gl2dRenderer.clearScreen({ 0, 0, 1, 1 }); // Clear frame baseline color
 
         std::sort(renderData.commands.begin(), renderData.commands.end(),
-            [](RenderCommand a, RenderCommand b) noexcept {
+            [](const RenderCommand& a, const RenderCommand& b) noexcept {
+                // 1. Primary Sort: LayerStack level (Lower layers render first, Upper layers overlay on top)
+                if (a.stack_index != b.stack_index) {
+                    return a.stack_index < b.stack_index;
+                }
+                // 2. Secondary Sort: Intra-layer depth (Within the same layer)
                 if (a.layer_depth != b.layer_depth) {
                     return a.layer_depth < b.layer_depth;
                 }
+                // 3. Tertiary Sort: Draw call key / Submission order
                 return a.sorting_key < b.sorting_key;
             }
         );

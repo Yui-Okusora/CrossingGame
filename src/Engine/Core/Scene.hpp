@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <type_traits>
 
 class Entity2D {
 public:
@@ -28,6 +29,43 @@ public:
     virtual void onCollision(const CollisionInfo& collision, EngineContext* ctx) {}
     virtual void onTrigger(const CollisionInfo& trigger, EngineContext* ctx) {}
     virtual void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {}
+};
+
+struct AnimationClip {
+    TextureHandle texture;
+    glm::uvec2 atlasDimensions{ 1, 1 }; // {Columns, Rows} in the spritesheet
+    int startFrame = 0;
+    int endFrame = 0;
+    float frameDuration = 0.1f;         // Seconds per frame
+    bool loop = true;
+
+    // Runtime State
+    float timer = 0.0f;
+    int currentFrame = 0;
+
+    void reset() {
+        currentFrame = startFrame;
+        timer = 0.0f;
+    }
+
+    void update(float dt) {
+        timer += dt;
+        if (timer >= frameDuration) {
+            timer -= frameDuration;
+            currentFrame++;
+            if (currentFrame > endFrame) {
+                currentFrame = loop ? startFrame : endFrame;
+            }
+        }
+    }
+
+    // Convert 1D frame index to 2D (Column, Row) for RectPayload
+    [[nodiscard]] glm::uvec2 getAtlasPos() const noexcept {
+        if (atlasDimensions.x == 0) return { 0, 0 };
+        uint32_t col = currentFrame % atlasDimensions.x;
+        uint32_t row = currentFrame / atlasDimensions.x;
+        return { col, row };
+    }
 };
 
 class Scene2D {
