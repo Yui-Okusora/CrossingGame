@@ -32,8 +32,9 @@ struct AttachCmd { std::unique_ptr<IEngineLayer> layer; };
 struct DetachCmd { IEngineLayer* layer_ptr; };
 struct SwapIdxCmd { size_t index_a; size_t index_b; };
 struct SwapPtrCmd { IEngineLayer* layer_a; IEngineLayer* layer_b; };
+struct ClearCmd {};
 
-using StackCommand = std::variant<AttachCmd, DetachCmd, SwapIdxCmd, SwapPtrCmd>;
+using StackCommand = std::variant<AttachCmd, DetachCmd, SwapIdxCmd, SwapPtrCmd, ClearCmd>;
 
 class LayerStack {
 private:
@@ -50,6 +51,7 @@ public:
     void deferSwap(size_t index_a, size_t index_b);
     void deferSwap(IEngineLayer* layer_a, IEngineLayer* layer_b);
     void deferSwapWith(IEngineLayer* self, IEngineLayer* other);
+    void deferClear();
 
     // Drained at a safe structural boundary by the central processing core thread
     void processDeferredCommands(EngineContext* ctx);

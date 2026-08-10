@@ -29,3 +29,6 @@
 
 // Helper Utilities
 #include "Utils/Utils.hpp"
+
+// Scene & Entity
+#include "Core/Scene.hpp"

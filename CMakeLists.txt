@@ -45,7 +45,7 @@ add_executable (CrossingGame
 
     # Mathematical Utilities
     "src/Engine/Utils/CRC32_64/CRC32_64.cpp"
-  "src/Engine/Graphics/RenderStream.cpp" "src/Game/Layers/MainMenu.cpp" "src/Game/Layers/Gameplay.cpp" "src/Game/Layers/HUD.cpp" "src/Game/Layers/PauseMenu.cpp" "src/Game/Layers/SaveLoadLayer.cpp" "src/Game/Layers/SettingsLayer.cpp" "src/Game/Layers/WinLoseLayer.cpp")
+  "src/Engine/Graphics/RenderStream.cpp" "src/Game/Layers/MainMenu.cpp" "src/Game/Layers/Gameplay.cpp" "src/Game/Layers/HUD.cpp" "src/Game/Layers/PauseMenu.cpp" "src/Game/Layers/SaveLoadLayer.cpp" "src/Game/Layers/SettingsLayer.cpp" "src/Game/Layers/WinLoseLayer.cpp"  "src/Game/Data/GameStateData.cpp" "src/Game/Entities/GoalEntity.cpp" "src/Game/Entities/BenchEntity.cpp" "src/Game/Entities/BusEntity.cpp" "src/Game/Entities/ElevatorCrowdEntity.cpp" "src/Game/Entities/CodeStreamEntity.cpp" "src/Game/Entities/LogPlatformEntity.cpp" "src/Game/Entities/StudentPlayerEntity.cpp")
 
 target_include_directories(CrossingGame PRIVATE include/ src/)
 

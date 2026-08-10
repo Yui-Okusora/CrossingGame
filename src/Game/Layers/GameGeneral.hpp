@@ -10,16 +10,18 @@ enum UIWidgetID : uint32_t {
     ID_MM_Settings,
     ID_MM_Exit,
 
-    ID_SET_VolumeSlider = 2001,
-    ID_SET_Back,
+    ID_SET_MasterSlider = 2001,
+    ID_SET_MusicSlider,  // 2002
+    ID_SET_SFXSlider,    // 2003
+    ID_SET_Back,         // 2004
 
     ID_NAME_TextBox = 3001,
     ID_NAME_Confirm,
     ID_NAME_Back,
 
-    ID_LOAD_Slot1 = 4001,
-    ID_LOAD_Slot2,
-    ID_LOAD_Back,
+    // Reserved range for procedural Load Slots (4000 to 4009)
+    ID_LOAD_Slot_Base = 4000,
+    ID_LOAD_Back = 4020,
 
     ID_PAUSE_Resume = 5001,
     ID_PAUSE_Save,
@@ -30,6 +32,7 @@ enum UIWidgetID : uint32_t {
     ID_POP_SaveRecord = 6001,
     ID_POP_MainMenu,
 
-    ID_SAVE_Slot1 = 7001,
-    ID_SAVE_Back
+    // Reserved range for procedural Save Slots (7000 to 7009)
+    ID_SAVE_Slot_Base = 7000,
+    ID_SAVE_Back = 7020
 };
