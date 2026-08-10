@@ -21,6 +21,7 @@ struct LaneData {
     LaneType type = LaneType::SafeZone;
     float moveSpeed = 0.0f;
     int direction = 1;
+    float spawnXOffset = 0.0f; // NEW: Procedural phase offset for staggered entity spawning
 
     // Elevator signal light state tracking
     float signalTimer = 0.0f;

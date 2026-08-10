@@ -57,59 +57,131 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
 }
 
 void GameplayLayer::generateLanesForLevel(int level) {
-    static std::mt19937 rng(1337 + level); // Seeded PRNG replacing rand()
-    std::uniform_real_distribution<float> speedDist(0.0f, 40.0f);
+    // 1. Seed PRNG deterministically per level
+    std::mt19937 rng(1337 + level * 100);
+    std::uniform_real_distribution<float> speedDist(110.0f + level * 18.0f, 150.0f + level * 28.0f);
+    std::uniform_real_distribution<float> offsetDist(0.0f, 320.0f);
+    std::uniform_int_distribution<int> clusterDist(1, (level >= 3) ? 3 : 2); // Clusters of 1-3 consecutive same-type lanes
+    std::uniform_int_distribution<int> hazardTypeDist(0, 3);
+    std::bernoulli_distribution dirDist(0.5);
 
-    int laneCount = 10 + (level * 3);
+    int totalLanes = 10 + (level * 3);
     float startY = 700.0f;
     float laneHeight = 64.0f;
 
-    m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0 });
+    m_lanes.clear();
 
-    for (int i = 1; i < laneCount - 1; ++i) {
-        float currentY = startY - (i * laneHeight);
-        LaneType type = static_cast<LaneType>((i % 4) + 1);
-        float speed = 120.0f + (level * 25.0f) + speedDist(rng);
-        int dir = (i % 2 == 0) ? 1 : -1;
+    // Bottom Start Zone (Safe)
+    m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, 0.0f, 0 });
 
-        m_lanes.push_back({ currentY, laneHeight, type, speed, dir, 0.0f, static_cast<uint8_t>(i % 3) });
+    const LaneType hazardPool[] = {
+        LaneType::Asphalt,
+        LaneType::ElevatorTile,
+        LaneType::IDELane,
+        LaneType::Water
+    };
+
+    int currentLaneIdx = 1;
+    int consecutiveHazards = 0;
+    int lastDirection = 1;
+    int sameDirStreak = 0;
+
+    // 2. Procedurally generate map with grouped hazard clusters
+    while (currentLaneIdx < totalLanes - 1) {
+        // Pacing Rule: Force a SafeZone rest stop if player faced 4 consecutive hazard lanes
+        if (consecutiveHazards >= 4) {
+            float currentY = startY - (currentLaneIdx * laneHeight);
+            m_lanes.push_back({ currentY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, 0.0f, 0 });
+            consecutiveHazards = 0;
+            currentLaneIdx++;
+            continue;
+        }
+
+        // Choose a hazard type and group cluster size
+        LaneType selectedType = hazardPool[hazardTypeDist(rng)];
+        int clusterSize = clusterDist(rng);
+
+        for (int c = 0; c < clusterSize && currentLaneIdx < totalLanes - 1; ++c) {
+            float currentY = startY - (currentLaneIdx * laneHeight);
+            float speed = speedDist(rng);
+
+            // Direction Logic: Prevent more than 2 consecutive lanes moving in the exact same direction
+            int dir = dirDist(rng) ? 1 : -1;
+            if (dir == lastDirection) {
+                sameDirStreak++;
+                if (sameDirStreak >= 2) {
+                    dir = -dir; // Flip direction
+                    sameDirStreak = 1;
+                }
+            }
+            else {
+                sameDirStreak = 1;
+            }
+            lastDirection = dir;
+
+            float xOffset = offsetDist(rng);
+
+            m_lanes.push_back({
+                currentY,
+                laneHeight,
+                selectedType,
+                speed,
+                dir,
+                xOffset, // Staggered spawn phase shift
+                0.0f,
+                static_cast<uint8_t>(c % 3)
+                });
+
+            consecutiveHazards++;
+            currentLaneIdx++;
+        }
     }
 
-    float goalY = startY - ((laneCount - 1) * laneHeight);
-    m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0 });
+    // Top Goal Zone (Safe)
+    float goalY = startY - ((totalLanes - 1) * laneHeight);
+    m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, 0.0f, 0 });
 }
 
 void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const auto& lane = m_lanes[i];
+        float offset = lane.spawnXOffset;
 
         if (i == m_lanes.size() - 1) {
             m_scene.spawn<GoalEntity>(glm::vec2(0.0f, lane.yPosition));
         }
         else if (lane.type == LaneType::SafeZone && i > 0) {
-            m_scene.spawn<BenchEntity>(glm::vec2(250.0f, lane.yPosition));
-            m_scene.spawn<BenchEntity>(glm::vec2(850.0f, lane.yPosition));
+            m_scene.spawn<BenchEntity>(glm::vec2(192.0f, lane.yPosition));
+            m_scene.spawn<BenchEntity>(glm::vec2(832.0f, lane.yPosition));
         }
         else if (lane.type == LaneType::Asphalt) {
-            m_scene.spawn<BusEntity>(glm::vec2(100.0f, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<BusEntity>(glm::vec2(650.0f, lane.yPosition), lane.moveSpeed, lane.direction);
+            float x1 = std::fmod(100.0f + offset, 1100.0f);
+            float x2 = std::fmod(650.0f + offset, 1100.0f);
+            m_scene.spawn<BusEntity>(glm::vec2(x1, lane.yPosition), lane.moveSpeed, lane.direction);
+            m_scene.spawn<BusEntity>(glm::vec2(x2, lane.yPosition), lane.moveSpeed, lane.direction);
         }
         else if (lane.type == LaneType::ElevatorTile) {
-            // Spawn 1 wide crowd entity per elevator lane
             auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
             m_elevatorCrowds.push_back(crowd);
         }
         else if (lane.type == LaneType::IDELane) {
-            m_scene.spawn<CodeStreamEntity>(glm::vec2(150.0f, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<CodeStreamEntity>(glm::vec2(750.0f, lane.yPosition), lane.moveSpeed, lane.direction);
+            float x1 = std::fmod(150.0f + offset, 1100.0f);
+            float x2 = std::fmod(750.0f + offset, 1100.0f);
+            m_scene.spawn<CodeStreamEntity>(glm::vec2(x1, lane.yPosition), lane.moveSpeed, lane.direction);
+            m_scene.spawn<CodeStreamEntity>(glm::vec2(x2, lane.yPosition), lane.moveSpeed, lane.direction);
         }
         else if (lane.type == LaneType::Water) {
-            m_scene.spawn<LogPlatformEntity>(glm::vec2(100.0f, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<LogPlatformEntity>(glm::vec2(550.0f, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<LogPlatformEntity>(glm::vec2(1000.0f, lane.yPosition), lane.moveSpeed, lane.direction);
+            // 3 logs staggered with phase offset across the water channel
+            float x1 = std::fmod(64.0f + offset, 1050.0f);
+            float x2 = std::fmod(440.0f + offset, 1050.0f);
+            float x3 = std::fmod(816.0f + offset, 1050.0f);
+            m_scene.spawn<LogPlatformEntity>(glm::vec2(x1, lane.yPosition), lane.moveSpeed, lane.direction);
+            m_scene.spawn<LogPlatformEntity>(glm::vec2(x2, lane.yPosition), lane.moveSpeed, lane.direction);
+            m_scene.spawn<LogPlatformEntity>(glm::vec2(x3, lane.yPosition), lane.moveSpeed, lane.direction);
         }
     }
 
+    // Grid-aligned player start spawn
     m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
 }
 
