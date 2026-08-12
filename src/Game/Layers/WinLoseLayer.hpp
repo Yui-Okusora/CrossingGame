@@ -14,7 +14,7 @@ private:
     bool m_isVictory = false;
 
 public:
-    WinLosePopupLayer() = default;
+    explicit WinLosePopupLayer(bool isVictory = false) : m_isVictory(isVictory) {}
     ~WinLosePopupLayer() override = default;
 
     void onAttach(EngineContext* ctx) override;

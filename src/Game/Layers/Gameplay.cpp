@@ -6,11 +6,14 @@
 #include "../Entities/CodeStreamEntity.hpp"
 #include "../Entities/LogPlatformEntity.hpp"
 #include "../Entities/StudentPlayerEntity.hpp"
+#include "../Entities/TeacherNPCEntity.hpp"
 #include "WinLoseLayer.hpp"
 #include "PauseMenu.hpp"
 #include <iostream>
 #include <random>
 #include <cmath>
+#include <numeric>
+#include <algorithm>
 
 void GameplayLayer::onAttach(EngineContext* ctx) {
     if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) {
@@ -57,11 +60,11 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
 }
 
 void GameplayLayer::generateLanesForLevel(int level) {
-    // 1. Seed PRNG deterministically per level
+    // Seed main PRNG deterministically per level
     std::mt19937 rng(1337 + level * 100);
     std::uniform_real_distribution<float> speedDist(110.0f + level * 18.0f, 150.0f + level * 28.0f);
     std::uniform_real_distribution<float> offsetDist(0.0f, 320.0f);
-    std::uniform_int_distribution<int> clusterDist(1, (level >= 3) ? 3 : 2); // Clusters of 1-3 consecutive same-type lanes
+    std::uniform_int_distribution<int> clusterDist(1, (level >= 3) ? 3 : 2);
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
 
@@ -72,7 +75,7 @@ void GameplayLayer::generateLanesForLevel(int level) {
     m_lanes.clear();
 
     // Bottom Start Zone (Safe)
-    m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, 0.0f, 0 });
+    m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
 
     const LaneType hazardPool[] = {
         LaneType::Asphalt,
@@ -86,18 +89,16 @@ void GameplayLayer::generateLanesForLevel(int level) {
     int lastDirection = 1;
     int sameDirStreak = 0;
 
-    // 2. Procedurally generate map with grouped hazard clusters
+    // Procedurally generate map with grouped hazard clusters
     while (currentLaneIdx < totalLanes - 1) {
-        // Pacing Rule: Force a SafeZone rest stop if player faced 4 consecutive hazard lanes
         if (consecutiveHazards >= 4) {
             float currentY = startY - (currentLaneIdx * laneHeight);
-            m_lanes.push_back({ currentY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, 0.0f, 0 });
+            m_lanes.push_back({ currentY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
             consecutiveHazards = 0;
             currentLaneIdx++;
             continue;
         }
 
-        // Choose a hazard type and group cluster size
         LaneType selectedType = hazardPool[hazardTypeDist(rng)];
         int clusterSize = clusterDist(rng);
 
@@ -105,12 +106,11 @@ void GameplayLayer::generateLanesForLevel(int level) {
             float currentY = startY - (currentLaneIdx * laneHeight);
             float speed = speedDist(rng);
 
-            // Direction Logic: Prevent more than 2 consecutive lanes moving in the exact same direction
             int dir = dirDist(rng) ? 1 : -1;
             if (dir == lastDirection) {
                 sameDirStreak++;
                 if (sameDirStreak >= 2) {
-                    dir = -dir; // Flip direction
+                    dir = -dir;
                     sameDirStreak = 1;
                 }
             }
@@ -127,7 +127,8 @@ void GameplayLayer::generateLanesForLevel(int level) {
                 selectedType,
                 speed,
                 dir,
-                xOffset, // Staggered spawn phase shift
+                xOffset,
+                rng(), // Assign unique lane seed
                 0.0f,
                 static_cast<uint8_t>(c % 3)
                 });
@@ -139,50 +140,90 @@ void GameplayLayer::generateLanesForLevel(int level) {
 
     // Top Goal Zone (Safe)
     float goalY = startY - ((totalLanes - 1) * laneHeight);
-    m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, 0.0f, 0 });
+    m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
 }
 
 void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
+    // --- FIX: Spawn player first to pass reference to teachers ---
+    m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
+
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const auto& lane = m_lanes[i];
-        float offset = lane.spawnXOffset;
+        std::mt19937 laneRng(lane.seed);
 
         if (i == m_lanes.size() - 1) {
             m_scene.spawn<GoalEntity>(glm::vec2(0.0f, lane.yPosition));
         }
         else if (lane.type == LaneType::SafeZone && i > 0) {
-            m_scene.spawn<BenchEntity>(glm::vec2(192.0f, lane.yPosition));
-            m_scene.spawn<BenchEntity>(glm::vec2(832.0f, lane.yPosition));
+            std::uniform_int_distribution<int> benchCountDist(1, 3);
+            int benchCount = benchCountDist(laneRng);
+
+            std::vector<int> validTileCols(16);
+            std::iota(validTileCols.begin(), validTileCols.end(), 1);
+            std::shuffle(validTileCols.begin(), validTileCols.end(), laneRng);
+
+            for (int b = 0; b < benchCount; ++b) {
+                float benchX = validTileCols[b] * 64.0f;
+                m_scene.spawn<BenchEntity>(glm::vec2(benchX, lane.yPosition));
+            }
+
+            std::uniform_int_distribution<int> buffTypeDist(0, 2);
+            TeacherBuffType randomBuff = static_cast<TeacherBuffType>(buffTypeDist(laneRng));
+
+            float patrolStartX = (validTileCols[benchCount] * 64.0f);
+            float patrolEndX = (validTileCols[benchCount + 1] * 64.0f);
+
+            auto* teacher = m_scene.spawn<TeacherNPCEntity>(
+                glm::vec2(patrolStartX, lane.yPosition),
+                glm::vec2(patrolEndX, lane.yPosition),
+                randomBuff
+            );
+
+            // --- FIX: Bind player pointer ---
+            teacher->setPlayer(m_player);
+            teacher->onAttach(ctx);
         }
         else if (lane.type == LaneType::Asphalt) {
-            float x1 = std::fmod(100.0f + offset, 1100.0f);
-            float x2 = std::fmod(650.0f + offset, 1100.0f);
-            m_scene.spawn<BusEntity>(glm::vec2(x1, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<BusEntity>(glm::vec2(x2, lane.yPosition), lane.moveSpeed, lane.direction);
+            std::uniform_int_distribution<int> countDist(1, (m_currentLevel >= 3) ? 3 : 2);
+            int busCount = countDist(laneRng);
+
+            float sectorWidth = 1100.0f / busCount;
+            std::uniform_real_distribution<float> jitterDist(0.0f, sectorWidth - 180.0f);
+
+            for (int b = 0; b < busCount; ++b) {
+                float x = (b * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
+                m_scene.spawn<BusEntity>(glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+            }
         }
         else if (lane.type == LaneType::ElevatorTile) {
             auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
             m_elevatorCrowds.push_back(crowd);
         }
         else if (lane.type == LaneType::IDELane) {
-            float x1 = std::fmod(150.0f + offset, 1100.0f);
-            float x2 = std::fmod(750.0f + offset, 1100.0f);
-            m_scene.spawn<CodeStreamEntity>(glm::vec2(x1, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<CodeStreamEntity>(glm::vec2(x2, lane.yPosition), lane.moveSpeed, lane.direction);
+            std::uniform_int_distribution<int> countDist(2, 3);
+            int streamCount = countDist(laneRng);
+
+            float sectorWidth = 1100.0f / streamCount;
+            std::uniform_real_distribution<float> jitterDist(0.0f, sectorWidth - 150.0f);
+
+            for (int c = 0; c < streamCount; ++c) {
+                float x = (c * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
+                m_scene.spawn<CodeStreamEntity>(glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+            }
         }
         else if (lane.type == LaneType::Water) {
-            // 3 logs staggered with phase offset across the water channel
-            float x1 = std::fmod(64.0f + offset, 1050.0f);
-            float x2 = std::fmod(440.0f + offset, 1050.0f);
-            float x3 = std::fmod(816.0f + offset, 1050.0f);
-            m_scene.spawn<LogPlatformEntity>(glm::vec2(x1, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<LogPlatformEntity>(glm::vec2(x2, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_scene.spawn<LogPlatformEntity>(glm::vec2(x3, lane.yPosition), lane.moveSpeed, lane.direction);
+            std::uniform_int_distribution<int> countDist(2, 4);
+            int logCount = countDist(laneRng);
+
+            float sectorWidth = 1050.0f / logCount;
+            std::uniform_real_distribution<float> jitterDist(0.0f, (std::max)(10.0f, sectorWidth - 200.0f));
+
+            for (int l = 0; l < logCount; ++l) {
+                float x = (l * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
+                m_scene.spawn<LogPlatformEntity>(glm::vec2(std::fmod(x, 1050.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+            }
         }
     }
-
-    // Grid-aligned player start spawn
-    m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
 }
 
 void GameplayLayer::updateElevatorSignals(float dt) {
@@ -193,17 +234,14 @@ void GameplayLayer::updateElevatorSignals(float dt) {
 
         lane.signalTimer += dt;
 
-        // Phase 0: RED (3.0s window - Safe for student)
         if (lane.signalPhase == 0 && lane.signalTimer >= 3.0f) {
-            lane.signalPhase = 1; // Turn Yellow
+            lane.signalPhase = 1;
             lane.signalTimer = 0.0f;
         }
-        // Phase 1: YELLOW (1.2s warning light before crowd rushes)
         else if (lane.signalPhase == 1 && lane.signalTimer >= 1.2f) {
-            lane.signalPhase = 2; // Turn Green
+            lane.signalPhase = 2;
             lane.signalTimer = 0.0f;
         }
-        // Phase 2: GREEN (Crowd rushes - ONLY resets to Red AFTER crowd finishes crossing)
         else if (lane.signalPhase == 2) {
             bool crowdFinished = true;
             if (crowdIdx < m_elevatorCrowds.size() && m_elevatorCrowds[crowdIdx]) {
@@ -211,7 +249,7 @@ void GameplayLayer::updateElevatorSignals(float dt) {
             }
 
             if (crowdFinished) {
-                lane.signalPhase = 0; // Safe to reset to Red
+                lane.signalPhase = 0;
                 lane.signalTimer = 0.0f;
             }
         }
@@ -274,7 +312,6 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
 
     if (m_player) {
         m_cameraTargetY = m_player->position.y - 450.0f;
-        // Frame-rate independent exponential decay for camera tracking
         float factor = 1.0f - std::exp(-6.0f * fDt);
         ctx->cameraPos.y = glm::mix(ctx->cameraPos.y, m_cameraTargetY, factor);
 
@@ -284,7 +321,6 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
 }
 
 void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Render Lane Background Strips
     for (const auto& lane : m_lanes) {
         glm::vec4 laneColor{ 0.2f, 0.2f, 0.2f, 1.0f };
 
@@ -303,13 +339,11 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
             .is_world_space = true
             });
 
-        // 2. Render Elevator Traffic Signal Lamps at Both Ends
         if (lane.type == LaneType::ElevatorTile) {
             glm::vec4 signalColor = (lane.signalPhase == 0) ? glm::vec4{ 0.9f, 0.1f, 0.1f, 1.0f }
                 : (lane.signalPhase == 1) ? glm::vec4{ 0.9f, 0.8f, 0.1f, 1.0f }
             : glm::vec4{ 0.1f, 0.9f, 0.2f, 1.0f };
 
-            // Left Signal Lamp
             writeBuffer.push_command(15, 0, RectPayload{
                 .dest_rect = { 15.0f, lane.yPosition + 12.0f, 24.0f, 40.0f },
                 .color = signalColor,
@@ -317,7 +351,6 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
                 .is_world_space = true
                 });
 
-            // Right Signal Lamp
             writeBuffer.push_command(15, 0, RectPayload{
                 .dest_rect = { 1161.0f, lane.yPosition + 12.0f, 24.0f, 40.0f },
                 .color = signalColor,
@@ -327,14 +360,13 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         }
     }
 
-    // 3. Render Scene Entities
     m_scene.populateRenderStream(writeBuffer, ctx);
 }
 
 void GameplayLayer::triggerGameOver(EngineContext* ctx) {
     if (m_isGameOver) return;
     m_isGameOver = true;
-    ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>());
+    ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(false));
 }
 
 void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
@@ -347,11 +379,14 @@ void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     }
     else {
         m_isLevelComplete = true;
-        ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>());
+        ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
     }
 }
 
 void GameplayLayer::updateScore(int newScore, EngineContext* ctx) {
+    if (m_player) {
+        newScore *= m_player->getScoreMultiplier();
+    }
     if (newScore > m_currentScore) {
         m_currentScore = newScore;
         ctx->blackboard.set("currentScore", m_currentScore);

@@ -22,9 +22,6 @@ void WinLosePopupLayer::onAttach(EngineContext* ctx) {
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) {
         m_currentLevel = *levelOpt;
     }
-
-    // Victory condition if max level (5) is reached with score intact
-    m_isVictory = (m_currentLevel >= 5);
 }
 
 void WinLosePopupLayer::onDetach(EngineContext* ctx) {

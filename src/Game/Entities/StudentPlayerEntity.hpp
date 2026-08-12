@@ -1,5 +1,6 @@
 #pragma once
 #include <Engine/Engine.hpp>
+#include "TeacherNPCEntity.hpp"
 
 class GameplayLayer;
 
@@ -23,13 +24,22 @@ private:
     glm::vec2 m_targetPosition{ 0.0f, 0.0f };
     bool m_isMoving = false;
 
-    // Input Buffering (prevents dropped keypresses when spamming)
+    // Input Buffering
     glm::vec2 m_inputBuffer{ 0.0f, 0.0f };
     float m_bufferTimer = 0.0f;
-    static constexpr float INPUT_BUFFER_DURATION = 0.18f; // 180ms queue window
+    static constexpr float INPUT_BUFFER_DURATION = 0.18f;
 
     bool m_touchingLogThisFrame = false;
     bool m_isDead = false;
+
+    // --- BUFF SYSTEM TIMERS & CHARGES ---
+    bool m_hasShield = false;            // 1-time hit protection shield
+    float m_speedBoostTimer = 0.0f;      // Speed boost duration timer
+    float m_gpaMultiplierTimer = 0.0f;   // 2X GPA multiplier duration timer
+    float m_invincibilityTimer = 0.0f;   // Invincibility duration timer (granted on shield pop)
+    int m_scoreMultiplier = 1;
+
+    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f; // 2 seconds i-frames
 
 public:
     bool isOnWaterLane = false;
@@ -38,6 +48,11 @@ public:
     StudentPlayerEntity(const glm::vec2& startPos, GameplayLayer* layerPtr, const PlayerConfig& config = PlayerConfig{});
 
     [[nodiscard]] bool isMoving() const noexcept { return m_isMoving; }
+    [[nodiscard]] bool hasShield() const noexcept { return m_hasShield; }
+    [[nodiscard]] bool isInvincible() const noexcept { return m_invincibilityTimer > 0.0f; }
+    [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
+
+    void applyBuff(TeacherBuffType buffType);
 
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;

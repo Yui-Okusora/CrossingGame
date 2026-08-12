@@ -9,6 +9,12 @@ private:
     int m_currentScore = 0;
     int m_highestScore = 0;
 
+    // --- BUFF HUD TELEMETRY ---
+    bool m_buffShieldActive = false;
+    float m_buffSpeedTimer = 0.0f;
+    float m_buffGpaTimer = 0.0f;
+    float m_buffInvincibleTimer = 0.0f;
+
 public:
     HUDLayer() = default;
     ~HUDLayer() override = default;
@@ -16,7 +22,6 @@ public:
     void onAttach(EngineContext* ctx) override;
     void onDetach(EngineContext* ctx) override;
 
-    // Pass-through behavior: allow input events and fixed updates to reach GameplayLayer underneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return false; }
     [[nodiscard]] bool blocksUpdates() const noexcept override { return false; }
 
