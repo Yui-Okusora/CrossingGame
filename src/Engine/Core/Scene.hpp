@@ -6,7 +6,132 @@
 #include <memory>
 #include <algorithm>
 #include <type_traits>
+#include <string>
+#include <unordered_map>
 
+// ============================================================================
+// SPRITESHEET ANIMATION CLIP
+// ============================================================================
+struct AnimationClip {
+    TextureHandle texture{};
+    glm::uvec2 atlasDimensions{ 1, 1 }; // {Columns, Rows} in spritesheet
+    int startFrame = 0;
+    int endFrame = 0;
+    float frameDuration = 0.1f;         // Seconds per frame
+    bool loop = true;                   // Loop upon reaching endFrame
+
+    // Runtime State
+    float timer = 0.0f;
+    int currentFrame = 0;
+    bool finished = false;
+
+    void reset() {
+        currentFrame = startFrame;
+        timer = 0.0f;
+        finished = false;
+    }
+
+    void update(float dt) {
+        if (finished && !loop) return;
+
+        timer += dt;
+        if (timer >= frameDuration) {
+            timer -= frameDuration;
+            currentFrame++;
+            if (currentFrame > endFrame) {
+                if (loop) {
+                    currentFrame = startFrame;
+                }
+                else {
+                    currentFrame = endFrame;
+                    finished = true;
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] bool isFinished() const noexcept { return finished; }
+
+    // Convert 1D frame index to 2D (Column, Row) coordinates for UV mapping
+    [[nodiscard]] glm::uvec2 getAtlasPos() const noexcept {
+        if (atlasDimensions.x == 0) return { 0, 0 };
+        uint32_t col = currentFrame % atlasDimensions.x;
+        uint32_t row = currentFrame / atlasDimensions.x;
+        return { col, row };
+    }
+};
+
+// ============================================================================
+// ANIMATOR 2D COMPONENT
+// ============================================================================
+class Animator2D {
+private:
+    std::unordered_map<std::string, AnimationClip> m_animations;
+    std::string m_currentAnimKey;
+    AnimationClip* m_currentClip = nullptr;
+
+public:
+    bool flipX = false; // Horizontal mirror toggle for left/right facing sprites
+
+    Animator2D() = default;
+
+    // Register a named animation clip into the animator state machine
+    void addAnimation(const std::string& name, const AnimationClip& clip) {
+        m_animations[name] = clip;
+        m_animations[name].reset();
+        if (!m_currentClip) {
+            play(name);
+        }
+    }
+
+    // Switch active playing animation
+    void play(const std::string& name, bool forceRestart = false) {
+        if (m_currentAnimKey == name && !forceRestart) return;
+
+        auto it = m_animations.find(name);
+        if (it != m_animations.end()) {
+            m_currentAnimKey = name;
+            m_currentClip = &it->second;
+            m_currentClip->reset();
+        }
+    }
+
+    // Advance sprite animation timeline
+    void update(float dt) {
+        if (m_currentClip) {
+            m_currentClip->update(dt);
+        }
+    }
+
+    [[nodiscard]] const std::string& getCurrentAnimationName() const noexcept { return m_currentAnimKey; }
+    [[nodiscard]] bool isCurrentAnimationFinished() const noexcept {
+        return m_currentClip ? m_currentClip->isFinished() : true;
+    }
+
+    // Directly emit textured sprite command into RenderData
+    void draw(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos,
+        const glm::vec2& drawSize, const glm::vec4& tint = { 1.0f, 1.0f, 1.0f, 1.0f },
+        int32_t depth = 40, bool isWorldSpace = true) {
+        if (!m_currentClip) return;
+
+        writeBuffer.push_command(depth, 0, RectPayload{
+            .dest_rect = { renderPos.x, renderPos.y, drawSize.x, drawSize.y },
+            .color = tint,
+            .texture = m_currentClip->texture,
+            .atlas_dimensions = m_currentClip->atlasDimensions,
+            .atlas_pos = m_currentClip->getAtlasPos(),
+            .origin = { 0.0f, 0.0f },
+            .rotation = 0.0f,
+            .flip_x = flipX,
+            .no_texture = false, // Enable GPU Spritesheet Sampling
+            .is_world_space = isWorldSpace
+            });
+    }
+};
+
+// ============================================================================
+// BASE 2D ENTITY
+// ============================================================================
 class Entity2D {
 public:
     uint32_t id = 0;
@@ -22,6 +147,8 @@ public:
     bool isTrigger = false;
     bool active = true;
 
+    Animator2D animator;                        // Embedded Spritesheet Animation Component
+
     virtual ~Entity2D() = default;
 
     // --- Pure Event Callbacks ---
@@ -31,43 +158,9 @@ public:
     virtual void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {}
 };
 
-struct AnimationClip {
-    TextureHandle texture;
-    glm::uvec2 atlasDimensions{ 1, 1 }; // {Columns, Rows} in the spritesheet
-    int startFrame = 0;
-    int endFrame = 0;
-    float frameDuration = 0.1f;         // Seconds per frame
-    bool loop = true;
-
-    // Runtime State
-    float timer = 0.0f;
-    int currentFrame = 0;
-
-    void reset() {
-        currentFrame = startFrame;
-        timer = 0.0f;
-    }
-
-    void update(float dt) {
-        timer += dt;
-        if (timer >= frameDuration) {
-            timer -= frameDuration;
-            currentFrame++;
-            if (currentFrame > endFrame) {
-                currentFrame = loop ? startFrame : endFrame;
-            }
-        }
-    }
-
-    // Convert 1D frame index to 2D (Column, Row) for RectPayload
-    [[nodiscard]] glm::uvec2 getAtlasPos() const noexcept {
-        if (atlasDimensions.x == 0) return { 0, 0 };
-        uint32_t col = currentFrame % atlasDimensions.x;
-        uint32_t row = currentFrame / atlasDimensions.x;
-        return { col, row };
-    }
-};
-
+// ============================================================================
+// 2D SCENE GRAPH & SIMULATION CORE
+// ============================================================================
 class Scene2D {
 private:
     std::vector<std::unique_ptr<Entity2D>> m_entities;
@@ -89,10 +182,14 @@ public:
     void fixedUpdate(double dt, EngineContext* ctx) {
         float fDt = static_cast<float>(dt);
 
-        // 1. Advance Physics Movement
+        // 1. Advance Physics & Animation State Machine
         for (auto& entity : m_entities) {
             if (!entity->active) continue;
             entity->prevPosition = entity->position;
+
+            // Advance entity animator tick
+            entity->animator.update(fDt);
+
             entity->onUpdate(fDt, ctx);
 
             if (!entity->isStatic) {
@@ -107,7 +204,6 @@ public:
             glm::vec4 currentBox{ entity->position.x, entity->position.y, entity->size.x, entity->size.y };
             m_rawQueryBuffer.clear();
 
-            // Ignore self-intersection at lowest engine layer
             ctx->collisionWorld.query_aabb(currentBox, entity->layer, entity->mask, m_rawQueryBuffer, entity->id);
 
             for (const auto& rawHit : m_rawQueryBuffer) {

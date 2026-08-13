@@ -68,7 +68,7 @@ void GameplayLayer::generateLanesForLevel(int level) {
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
 
-    int totalLanes = 10 + (level * 3);
+    int totalLanes = 20 + (level * 3);
     float startY = 700.0f;
     float laneHeight = 64.0f;
 
