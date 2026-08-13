@@ -27,4 +27,7 @@ struct LaneData {
     // Elevator signal light state tracking
     float signalTimer = 0.0f;
     uint8_t signalPhase = 0; // 0 = Red, 1 = Yellow, 2 = Green
+
+    float waterAnimTimer = 0.0f;
+    uint8_t waterAnimFrame = 0;
 };

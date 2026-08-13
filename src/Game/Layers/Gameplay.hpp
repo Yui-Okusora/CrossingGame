@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Engine/Engine.hpp>
 #include "GameGeneral.hpp"
 #include "LaneData.hpp"
@@ -17,7 +17,7 @@ private:
 
     std::string m_playerName = "HCMUS Student";
     int m_currentLevel = 1;
-    int m_maxLevel = 5;
+    int m_maxLevel = 10;
     int m_currentScore = 0;
     int m_highestScore = 0;
 
@@ -32,6 +32,12 @@ private:
     void generateLanesForLevel(int level);
     void spawnLaneEntities(EngineContext* ctx);
     void updateElevatorSignals(float dt);
+
+    TextureHandle m_texWater;
+    glm::uvec2 m_waterAtlasDims{ 4, 1 };   // VD: River.png là spritesheet 4 cột x 1 hàng
+    float m_waterFrameDuration = 0.12f;    // giây / frame
+
+    void updateWaterAnimation(float dt);
 
 public:
     GameplayLayer() = default;

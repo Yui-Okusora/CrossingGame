@@ -29,6 +29,9 @@ void GameplayLayer::onAttach(EngineContext* ctx) {
     m_currentScore = 0;
     ctx->blackboard.set("currentScore", m_currentScore);
 
+    m_texWater = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/River/River.png");
+
+
     initLevel(m_currentLevel, ctx);
 }
 
@@ -226,6 +229,21 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
     }
 }
 
+void GameplayLayer::updateWaterAnimation(float dt) {
+    int totalFrames = static_cast<int>(m_waterAtlasDims.x * m_waterAtlasDims.y);
+    if (totalFrames <= 0) return;
+
+    for (auto& lane : m_lanes) {
+        if (lane.type != LaneType::Water) continue;
+
+        lane.waterAnimTimer += dt;
+        if (lane.waterAnimTimer >= m_waterFrameDuration) {
+            lane.waterAnimTimer -= m_waterFrameDuration;
+            lane.waterAnimFrame = static_cast<uint8_t>((lane.waterAnimFrame + 1) % totalFrames);
+        }
+    }
+}
+
 void GameplayLayer::updateElevatorSignals(float dt) {
     size_t crowdIdx = 0;
 
@@ -283,6 +301,7 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
     float fDt = static_cast<float>(dt);
 
     updateElevatorSignals(fDt);
+    updateWaterAnimation(fDt);
 
     if (m_player) {
         m_player->isOnWaterLane = false;
@@ -322,20 +341,38 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
 
 void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
     for (const auto& lane : m_lanes) {
-        glm::vec4 laneColor{ 0.2f, 0.2f, 0.2f, 1.0f };
+        TextureHandle laneTex;
 
         switch (lane.type) {
-        case LaneType::SafeZone:     laneColor = { 0.22f, 0.45f, 0.22f, 1.0f }; break;
-        case LaneType::Asphalt:      laneColor = { 0.15f, 0.15f, 0.18f, 1.0f }; break;
-        case LaneType::ElevatorTile: laneColor = { 0.50f, 0.45f, 0.38f, 1.0f }; break;
-        case LaneType::IDELane:      laneColor = { 0.10f, 0.12f, 0.18f, 1.0f }; break;
-        case LaneType::Water:        laneColor = { 0.12f, 0.30f, 0.55f, 1.0f }; break;
+        case LaneType::SafeZone:     laneTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png"); break;
+        case LaneType::Asphalt:      laneTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Road/Road.png"); break;
+        case LaneType::ElevatorTile: laneTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/ElevatorRoad.png"); break;
+        case LaneType::IDELane:      laneTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine.png"); break;
+        case LaneType::Water:        
+        {
+            uint32_t col = lane.waterAnimFrame % m_waterAtlasDims.x;
+            uint32_t row = lane.waterAnimFrame / m_waterAtlasDims.x;
+
+            writeBuffer.push_command(10, 0, RectPayload{
+                .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height },
+                .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .texture = m_texWater,
+                .atlas_dimensions = m_waterAtlasDims,
+                .atlas_pos = { col, row },
+                .no_texture = false,
+                .is_world_space = true
+                });
+            continue;
+        }
         }
 
         writeBuffer.push_command(10, 0, RectPayload{
             .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height },
-            .color = laneColor,
-            .no_texture = true,
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = laneTex,
+            .atlas_dimensions = { 1, 1 },
+            .atlas_pos = { 0, 0 },
+            .no_texture = false,
             .is_world_space = true
             });
 
