@@ -235,6 +235,85 @@ int main() {
         Application app("CrossingGame", 1200, 805);
         EngineContext& ctx = app.getContext();
 
+        // --- BUSES ---
+        TextureHandle texBusLong = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/LongBus.png");
+        TextureHandle texBusShortSheet = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
+
+        // --- CODE OBSTACLES ---
+        TextureHandle texCodeCondition = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-Condition.png");
+        TextureHandle texCodeMissing = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-Missing_.png");
+        TextureHandle texCodeNullPtr = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-NullPtr.png");
+        TextureHandle texCodeOutOfMemory = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-OutOfMemory.png");
+        TextureHandle texCodeStackOverflow = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-StackOverflow.png");
+        TextureHandle texCodeWhile = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-While.png");
+        TextureHandle texCodeLine = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine.png");
+
+        // --- DEADLINE POPUP ---
+        TextureHandle texDeadlinePopup = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/DeadlinePopup/DeadlinePopup.png");
+
+        // --- ELEVATOR ---
+        TextureHandle texElevatorClosed = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-closed.png");
+        TextureHandle texElevatorClosing = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-closing.png");
+        TextureHandle texElevatorOpened = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-opened.png");
+        TextureHandle texElevatorOpening = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-opening.png");
+        TextureHandle texElevatorRoad = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/ElevatorRoad.png");
+        TextureHandle texWaitingLine = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/WaitingLine.png");
+
+        // --- EXAM PAPER & FONT ---
+        TextureHandle texExamPaper = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/ExamPaper/ExamPaper.png");
+        TextureHandle texFontBoldPixels = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Font/BoldPixels.png");
+
+        // --- GAME HUD ---
+        TextureHandle texIconBuff = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/GameHUD/iconBuff.png");
+        TextureHandle texNewUI = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/GameHUD/NewUI.png");
+        TextureHandle texPointMeter = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/GameHUD/PointMeter/PointMeter.png");
+
+        // --- GRASS, ROAD & TERRAIN ---
+        TextureHandle texGrassEnd = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassEnd.png");
+        TextureHandle texGrassSafePath = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
+        TextureHandle texGrassStart = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassStart.png");
+        TextureHandle texLevelUpLine = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/LevelUpLine.png");
+        TextureHandle texStoneBench = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/Stone Bench.png");
+        TextureHandle texRiver = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/River/River.png");
+        TextureHandle texRoad = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Road/Road.png");
+
+        // --- MAIN MENU ---
+        TextureHandle texContinueButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Continue button.png");
+        TextureHandle texDonateButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/DonateButton.png");
+        TextureHandle texExitButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Exit button.png");
+        TextureHandle texMainBackground = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
+        TextureHandle texOptionButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Option button.png");
+        TextureHandle texPlayButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Play button.png");
+
+        // --- MAIN CHARACTER ---
+        TextureHandle texAuraBuff = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/auraBuff.png");
+        TextureHandle texCatAnim = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Cat character rework - animation.png");
+        TextureHandle texFallWater = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Fallwater.png");
+        TextureHandle texLoseAnim = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/loseAnimation.png");
+        TextureHandle texWinAnim = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/winAnimation.png");
+
+        // --- MENUS & OVERLAYS ---
+        TextureHandle texMainMenuButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/MainMenuButton.png");
+        TextureHandle texMenuButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/MenuButton.png");
+        TextureHandle texMenuPanel = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/MenuPanel.png");
+        TextureHandle texPlayButtonUI = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/PlayButton.png");
+        TextureHandle texRestartButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/RestartButton.png");
+        TextureHandle texSaveButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/SaveButton.png");
+        TextureHandle texSettingButton = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/SettingButton.png");
+        TextureHandle texMusicSlider = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/MusicSetting/MusicSlider.png");
+        TextureHandle texSaveGameBox = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/SaveGame/savegame box.png");
+
+        // --- RESULT SCREEN ---
+        TextureHandle texBachelorBadge = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/BachelorBadge.png");
+        TextureHandle texLoseScreen = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/LoseScreen.png");
+        TextureHandle texMasterBadge = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/MasterBadge.png");
+        TextureHandle texPhDBadge = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/PhDBadge.png");
+        TextureHandle texWinScreen = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/WinScreen.png");
+
+        // --- TEACHERS ---
+        TextureHandle texTeacherQuan = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png");
+        TextureHandle texTeacherTinh = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Teacher/Teacher Tinh - animation.png");
+
         ctx.layerStack->pushLayer(std::make_unique<MainMenuLayer>(), &ctx);
         app.run();
     }
@@ -988,7 +1067,132 @@ public:
 #include <memory>
 #include <algorithm>
 #include <type_traits>
+#include <string>
+#include <unordered_map>
 
+// ============================================================================
+// SPRITESHEET ANIMATION CLIP
+// ============================================================================
+struct AnimationClip {
+    TextureHandle texture{};
+    glm::uvec2 atlasDimensions{ 1, 1 }; // {Columns, Rows} in spritesheet
+    int startFrame = 0;
+    int endFrame = 0;
+    float frameDuration = 0.1f;         // Seconds per frame
+    bool loop = true;                   // Loop upon reaching endFrame
+
+    // Runtime State
+    float timer = 0.0f;
+    int currentFrame = 0;
+    bool finished = false;
+
+    void reset() {
+        currentFrame = startFrame;
+        timer = 0.0f;
+        finished = false;
+    }
+
+    void update(float dt) {
+        if (finished && !loop) return;
+
+        timer += dt;
+        if (timer >= frameDuration) {
+            timer -= frameDuration;
+            currentFrame++;
+            if (currentFrame > endFrame) {
+                if (loop) {
+                    currentFrame = startFrame;
+                }
+                else {
+                    currentFrame = endFrame;
+                    finished = true;
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] bool isFinished() const noexcept { return finished; }
+
+    // Convert 1D frame index to 2D (Column, Row) coordinates for UV mapping
+    [[nodiscard]] glm::uvec2 getAtlasPos() const noexcept {
+        if (atlasDimensions.x == 0) return { 0, 0 };
+        uint32_t col = currentFrame % atlasDimensions.x;
+        uint32_t row = currentFrame / atlasDimensions.x;
+        return { col, row };
+    }
+};
+
+// ============================================================================
+// ANIMATOR 2D COMPONENT
+// ============================================================================
+class Animator2D {
+private:
+    std::unordered_map<std::string, AnimationClip> m_animations;
+    std::string m_currentAnimKey;
+    AnimationClip* m_currentClip = nullptr;
+
+public:
+    bool flipX = false; // Horizontal mirror toggle for left/right facing sprites
+
+    Animator2D() = default;
+
+    // Register a named animation clip into the animator state machine
+    void addAnimation(const std::string& name, const AnimationClip& clip) {
+        m_animations[name] = clip;
+        m_animations[name].reset();
+        if (!m_currentClip) {
+            play(name);
+        }
+    }
+
+    // Switch active playing animation
+    void play(const std::string& name, bool forceRestart = false) {
+        if (m_currentAnimKey == name && !forceRestart) return;
+
+        auto it = m_animations.find(name);
+        if (it != m_animations.end()) {
+            m_currentAnimKey = name;
+            m_currentClip = &it->second;
+            m_currentClip->reset();
+        }
+    }
+
+    // Advance sprite animation timeline
+    void update(float dt) {
+        if (m_currentClip) {
+            m_currentClip->update(dt);
+        }
+    }
+
+    [[nodiscard]] const std::string& getCurrentAnimationName() const noexcept { return m_currentAnimKey; }
+    [[nodiscard]] bool isCurrentAnimationFinished() const noexcept {
+        return m_currentClip ? m_currentClip->isFinished() : true;
+    }
+
+    // Directly emit textured sprite command into RenderData
+    void draw(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos,
+        const glm::vec2& drawSize, const glm::vec4& tint = { 1.0f, 1.0f, 1.0f, 1.0f },
+        int32_t depth = 40, bool isWorldSpace = true) {
+        if (!m_currentClip) return;
+
+        writeBuffer.push_command(depth, 0, RectPayload{
+            .dest_rect = { renderPos.x, renderPos.y, drawSize.x, drawSize.y },
+            .color = tint,
+            .texture = m_currentClip->texture,
+            .atlas_dimensions = m_currentClip->atlasDimensions,
+            .atlas_pos = m_currentClip->getAtlasPos(),
+            .origin = { 0.0f, 0.0f },
+            .rotation = 0.0f,
+            .flip_x = flipX,
+            .no_texture = false, // Enable GPU Spritesheet Sampling
+            .is_world_space = isWorldSpace
+            });
+    }
+};
+
+// ============================================================================
+// BASE 2D ENTITY
+// ============================================================================
 class Entity2D {
 public:
     uint32_t id = 0;
@@ -1004,6 +1208,8 @@ public:
     bool isTrigger = false;
     bool active = true;
 
+    Animator2D animator;                        // Embedded Spritesheet Animation Component
+
     virtual ~Entity2D() = default;
 
     // --- Pure Event Callbacks ---
@@ -1013,43 +1219,9 @@ public:
     virtual void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {}
 };
 
-struct AnimationClip {
-    TextureHandle texture;
-    glm::uvec2 atlasDimensions{ 1, 1 }; // {Columns, Rows} in the spritesheet
-    int startFrame = 0;
-    int endFrame = 0;
-    float frameDuration = 0.1f;         // Seconds per frame
-    bool loop = true;
-
-    // Runtime State
-    float timer = 0.0f;
-    int currentFrame = 0;
-
-    void reset() {
-        currentFrame = startFrame;
-        timer = 0.0f;
-    }
-
-    void update(float dt) {
-        timer += dt;
-        if (timer >= frameDuration) {
-            timer -= frameDuration;
-            currentFrame++;
-            if (currentFrame > endFrame) {
-                currentFrame = loop ? startFrame : endFrame;
-            }
-        }
-    }
-
-    // Convert 1D frame index to 2D (Column, Row) for RectPayload
-    [[nodiscard]] glm::uvec2 getAtlasPos() const noexcept {
-        if (atlasDimensions.x == 0) return { 0, 0 };
-        uint32_t col = currentFrame % atlasDimensions.x;
-        uint32_t row = currentFrame / atlasDimensions.x;
-        return { col, row };
-    }
-};
-
+// ============================================================================
+// 2D SCENE GRAPH & SIMULATION CORE
+// ============================================================================
 class Scene2D {
 private:
     std::vector<std::unique_ptr<Entity2D>> m_entities;
@@ -1071,10 +1243,14 @@ public:
     void fixedUpdate(double dt, EngineContext* ctx) {
         float fDt = static_cast<float>(dt);
 
-        // 1. Advance Physics Movement
+        // 1. Advance Physics & Animation State Machine
         for (auto& entity : m_entities) {
             if (!entity->active) continue;
             entity->prevPosition = entity->position;
+
+            // Advance entity animator tick
+            entity->animator.update(fDt);
+
             entity->onUpdate(fDt, ctx);
 
             if (!entity->isStatic) {
@@ -1089,7 +1265,6 @@ public:
             glm::vec4 currentBox{ entity->position.x, entity->position.y, entity->size.x, entity->size.y };
             m_rawQueryBuffer.clear();
 
-            // Ignore self-intersection at lowest engine layer
             ctx->collisionWorld.query_aabb(currentBox, entity->layer, entity->mask, m_rawQueryBuffer, entity->id);
 
             for (const auto& rawHit : m_rawQueryBuffer) {
@@ -3612,17 +3787,17 @@ StudentPlayerEntity::StudentPlayerEntity(const glm::vec2& startPos, GameplayLaye
 void StudentPlayerEntity::applyBuff(TeacherBuffType buffType) {
     switch (buffType) {
     case TeacherBuffType::SpeedBoost:
-        m_speedBoostTimer = 10.0f; // 10 seconds duration
+        m_speedBoostTimer = 10.0f;
         m_config.lerpSpeed = 38.0f;
         std::cout << "[Buff]: Speed Boost (10s)\n";
         break;
     case TeacherBuffType::DeadlineShield:
-        m_hasShield = true; // 1-time hit protection
+        m_hasShield = true;
         std::cout << "[Buff]: Deadline Shield Activated\n";
         break;
     case TeacherBuffType::GpaMultiplier:
         m_scoreMultiplier = 2;
-        m_gpaMultiplierTimer = 12.0f; // 12 seconds 2X GPA multiplier
+        m_gpaMultiplierTimer = 12.0f;
         std::cout << "[Buff]: 2X GPA Multiplier (12s)\n";
         break;
     }
@@ -3633,12 +3808,12 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
 
     m_touchingLogThisFrame = false;
 
-    // 1. UPDATE BUFF TIMERS
+    // 1. UPDATE BUFF & INVINCIBILITY TIMERS
     if (m_speedBoostTimer > 0.0f) {
         m_speedBoostTimer -= dt;
         if (m_speedBoostTimer <= 0.0f) {
             m_speedBoostTimer = 0.0f;
-            m_config.lerpSpeed = 22.0f; // Reset to default speed
+            m_config.lerpSpeed = 22.0f;
         }
     }
 
@@ -3646,15 +3821,23 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
         m_gpaMultiplierTimer -= dt;
         if (m_gpaMultiplierTimer <= 0.0f) {
             m_gpaMultiplierTimer = 0.0f;
-            m_scoreMultiplier = 1; // Reset to 1X multiplier
+            m_scoreMultiplier = 1;
         }
     }
 
-    // 2. PUBLISH BUFF TELEMETRY TO BLACKBOARD
+    if (m_invincibilityTimer > 0.0f) {
+        m_invincibilityTimer -= dt;
+        if (m_invincibilityTimer <= 0.0f) {
+            m_invincibilityTimer = 0.0f;
+        }
+    }
+
+    // 2. PUBLISH TELEMETRY TO BLACKBOARD
     if (ctx) {
         ctx->blackboard.set("buffShield", m_hasShield);
         ctx->blackboard.set("buffSpeedTimer", m_speedBoostTimer);
         ctx->blackboard.set("buffGpaTimer", m_gpaMultiplierTimer);
+        ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
     }
 
     // 3. CAPTURE INPUT
@@ -3714,10 +3897,20 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
     if (m_isDead) return;
 
     if ((collision.targetLayer & CollisionLayer::Layer_Enemy) != 0) {
+        // IGNORE ENEMY HITS DURING INVINCIBILITY
+        if (m_invincibilityTimer > 0.0f) {
+            return;
+        }
+
+        // CONSUME SHIELD -> GRANT INVINCIBILITY
         if (m_hasShield) {
-            m_hasShield = false; // Consume 1-time hit shield
-            if (ctx) ctx->blackboard.set("buffShield", false);
-            std::cout << "[Deadline Shield]: Absorbed enemy collision!\n";
+            m_hasShield = false;
+            m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
+            if (ctx) {
+                ctx->blackboard.set("buffShield", false);
+                ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
+            }
+            std::cout << "[Deadline Shield]: Triggered! Granted " << SHIELD_INVINCIBILITY_DURATION << "s Invincibility!\n";
         }
         else {
             m_isDead = true;
@@ -3744,9 +3937,16 @@ void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
             m_targetPosition.x = position.x;
 
             if (position.x < m_config.minX - 20.0f || position.x > m_config.maxX + 20.0f) {
-                if (m_hasShield) {
+                if (m_invincibilityTimer > 0.0f) {
+                    // Safe during i-frames
+                }
+                else if (m_hasShield) {
                     m_hasShield = false;
-                    if (ctx) ctx->blackboard.set("buffShield", false);
+                    m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
+                    if (ctx) {
+                        ctx->blackboard.set("buffShield", false);
+                        ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
+                    }
                     position.x = 576.0f;
                     m_targetPosition.x = 576.0f;
                 }
@@ -3757,10 +3957,17 @@ void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
             }
         }
         else if (isOnWaterLane) {
-            if (m_hasShield) {
+            if (m_invincibilityTimer > 0.0f) {
+                // Safe during i-frames
+            }
+            else if (m_hasShield) {
                 m_hasShield = false;
-                if (ctx) ctx->blackboard.set("buffShield", false);
-                std::cout << "[Deadline Shield]: Rescued from drowning!\n";
+                m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
+                if (ctx) {
+                    ctx->blackboard.set("buffShield", false);
+                    ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
+                }
+                std::cout << "[Deadline Shield]: Rescued from drowning! Granted invincibility!\n";
             }
             else {
                 m_isDead = true;
@@ -3778,10 +3985,22 @@ void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, 
         .is_world_space = true
         });
 
-    if (m_hasShield) {
+    // FLASHING CYAN INVINCIBILITY AURA WHEN TRIGGERED
+    if (m_invincibilityTimer > 0.0f) {
+        if (static_cast<int>(m_invincibilityTimer * 12.0f) % 2 == 0) {
+            writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
+                .dest_rect = { renderPos.x + 2.0f, renderPos.y + 2.0f, size.x + 16.0f, size.y + 16.0f },
+                .color = { 0.2f, 0.9f, 1.0f, 0.6f }, // Glowing Cyan
+                .no_texture = true,
+                .is_world_space = true
+                });
+        }
+    }
+    // SOLID GOLD AURA WHILE SHIELD IS READY
+    else if (m_hasShield) {
         writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
             .dest_rect = { renderPos.x + 4.0f, renderPos.y + 4.0f, size.x + 12.0f, size.y + 12.0f },
-            .color = { 1.0f, 0.85f, 0.1f, 0.45f },
+            .color = { 1.0f, 0.85f, 0.1f, 0.45f }, // Gold Shield
             .no_texture = true,
             .is_world_space = true
             });
@@ -3831,7 +4050,10 @@ private:
     bool m_hasShield = false;            // 1-time hit protection shield
     float m_speedBoostTimer = 0.0f;      // Speed boost duration timer
     float m_gpaMultiplierTimer = 0.0f;   // 2X GPA multiplier duration timer
+    float m_invincibilityTimer = 0.0f;   // Invincibility duration timer (granted on shield pop)
     int m_scoreMultiplier = 1;
+
+    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f; // 2 seconds i-frames
 
 public:
     bool isOnWaterLane = false;
@@ -3841,6 +4063,7 @@ public:
 
     [[nodiscard]] bool isMoving() const noexcept { return m_isMoving; }
     [[nodiscard]] bool hasShield() const noexcept { return m_hasShield; }
+    [[nodiscard]] bool isInvincible() const noexcept { return m_invincibilityTimer > 0.0f; }
     [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
 
     void applyBuff(TeacherBuffType buffType);
@@ -3869,11 +4092,10 @@ TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrol
     m_patrolB = patrolB;
     size = glm::vec2(44.0f, 44.0f);
 
-    // Dynamic color coding based on Buff Type
     switch (m_buffType) {
-    case TeacherBuffType::SpeedBoost:     m_color = glm::vec4{ 0.2f, 0.85f, 0.3f, 1.0f }; break; // Green
-    case TeacherBuffType::DeadlineShield: m_color = glm::vec4{ 0.9f, 0.75f, 0.1f, 1.0f }; break; // Gold Shield
-    case TeacherBuffType::GpaMultiplier:  m_color = glm::vec4{ 0.85f, 0.2f, 0.95f, 1.0f }; break; // Purple Multiplier
+    case TeacherBuffType::SpeedBoost:     m_color = glm::vec4{ 0.2f, 0.85f, 0.3f, 1.0f }; break;
+    case TeacherBuffType::DeadlineShield: m_color = glm::vec4{ 0.9f, 0.75f, 0.1f, 1.0f }; break;
+    case TeacherBuffType::GpaMultiplier:  m_color = glm::vec4{ 0.85f, 0.2f, 0.95f, 1.0f }; break;
     }
 
     layer = CollisionLayer::Layer_TriggerVolume;
@@ -3884,7 +4106,6 @@ TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrol
 
 void TeacherNPCEntity::onAttach(EngineContext* ctx) {
     if (ctx) {
-        // Load pickup SFX
         m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "buff_pickup.wav");
     }
 }
@@ -3892,14 +4113,13 @@ void TeacherNPCEntity::onAttach(EngineContext* ctx) {
 void TeacherNPCEntity::onUpdate(float dt, EngineContext* ctx) {
     if (m_isBuffGiven) return;
 
-    // Ping-pong patrol movement between Patrol Point A and Patrol Point B
     glm::vec2 target = m_movingToB ? m_patrolB : m_patrolA;
     glm::vec2 dir = target - position;
     float dist = glm::length(dir);
 
     if (dist < 4.0f) {
         position = target;
-        m_movingToB = !m_movingToB; // Reverse direction
+        m_movingToB = !m_movingToB;
     }
     else {
         velocity = glm::normalize(dir) * m_moveSpeed;
@@ -3917,6 +4137,11 @@ void TeacherNPCEntity::onTrigger(const CollisionInfo& trigger, EngineContext* ct
         m_isBuffGiven = true;
         active = false; // Disappear from arena upon pickup
 
+        // --- FIX: Apply buff to player on collision ---
+        if (m_player) {
+            m_player->applyBuff(m_buffType);
+        }
+
         if (ctx) {
             ctx->audioEngine.play(m_buffSFX, AudioCategory::GameplaySFX);
         }
@@ -3928,7 +4153,6 @@ void TeacherNPCEntity::onTrigger(const CollisionInfo& trigger, EngineContext* ct
 void TeacherNPCEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
     if (m_isBuffGiven) return;
 
-    // Render Teacher NPC sprite/box
     writeBuffer.push_command(m_renderDepth, 0, RectPayload{
         .dest_rect = { renderPos.x + 10.0f, renderPos.y + 10.0f, size.x, size.y },
         .color = m_color,
@@ -3945,15 +4169,17 @@ void TeacherNPCEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, con
 #pragma once
 #include <Engine/Engine.hpp>
 
-// 3 Buff Types specified in Section 4.4
+class StudentPlayerEntity; // Forward declaration
+
 enum class TeacherBuffType : uint8_t {
-    SpeedBoost,      // Tăng tốc chạy (Faster movement lerp)
-    DeadlineShield,  // Khiên miễn va chạm 1 lần (1-time hit protection)[cite: 11]
-    GpaMultiplier    // Tăng điểm nhận được (2x GPA score multiplier)[cite: 11]
+    SpeedBoost,
+    DeadlineShield,
+    GpaMultiplier
 };
 
 class TeacherNPCEntity : public Entity2D {
 private:
+    StudentPlayerEntity* m_player = nullptr; // <--- Add player pointer
     TeacherBuffType m_buffType = TeacherBuffType::SpeedBoost;
     glm::vec2 m_patrolA{ 0.0f, 0.0f };
     glm::vec2 m_patrolB{ 0.0f, 0.0f };
@@ -3969,6 +4195,8 @@ public:
     TeacherNPCEntity(const glm::vec2& pos,
         const glm::vec2& patrolB,
         TeacherBuffType buff = TeacherBuffType::SpeedBoost);
+
+    void setPlayer(StudentPlayerEntity* player) noexcept { m_player = player; } // <--- Setter
 
     void onAttach(EngineContext* ctx);
     void onUpdate(float dt, EngineContext* ctx) override;
@@ -4099,7 +4327,7 @@ void GameplayLayer::generateLanesForLevel(int level) {
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
 
-    int totalLanes = 10 + (level * 3);
+    int totalLanes = 20 + (level * 3);
     float startY = 700.0f;
     float laneHeight = 64.0f;
 
@@ -4175,6 +4403,9 @@ void GameplayLayer::generateLanesForLevel(int level) {
 }
 
 void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
+    // --- FIX: Spawn player first to pass reference to teachers ---
+    m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
+
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const auto& lane = m_lanes[i];
         std::mt19937 laneRng(lane.seed);
@@ -4183,13 +4414,11 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
             m_scene.spawn<GoalEntity>(glm::vec2(0.0f, lane.yPosition));
         }
         else if (lane.type == LaneType::SafeZone && i > 0) {
-            // 1. RANDOM BENCHES: Procedurally select 1 to 3 grid-aligned tiles (64px grid)
             std::uniform_int_distribution<int> benchCountDist(1, 3);
             int benchCount = benchCountDist(laneRng);
 
-            // Valid tile columns (18 tiles across 1200px width, reserving extreme edges)
             std::vector<int> validTileCols(16);
-            std::iota(validTileCols.begin(), validTileCols.end(), 1); // Tile cols 1..16
+            std::iota(validTileCols.begin(), validTileCols.end(), 1);
             std::shuffle(validTileCols.begin(), validTileCols.end(), laneRng);
 
             for (int b = 0; b < benchCount; ++b) {
@@ -4197,7 +4426,6 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
                 m_scene.spawn<BenchEntity>(glm::vec2(benchX, lane.yPosition));
             }
 
-            // 2. TEACHER NPC BUFF: Spawn on safe lanes
             std::uniform_int_distribution<int> buffTypeDist(0, 2);
             TeacherBuffType randomBuff = static_cast<TeacherBuffType>(buffTypeDist(laneRng));
 
@@ -4209,10 +4437,12 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
                 glm::vec2(patrolEndX, lane.yPosition),
                 randomBuff
             );
+
+            // --- FIX: Bind player pointer ---
+            teacher->setPlayer(m_player);
             teacher->onAttach(ctx);
         }
         else if (lane.type == LaneType::Asphalt) {
-            // NON-PATTERNED BUSES: Variable count (1..3) & randomized non-overlapping positions
             std::uniform_int_distribution<int> countDist(1, (m_currentLevel >= 3) ? 3 : 2);
             int busCount = countDist(laneRng);
 
@@ -4229,7 +4459,6 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
             m_elevatorCrowds.push_back(crowd);
         }
         else if (lane.type == LaneType::IDELane) {
-            // NON-PATTERNED CODE STREAMS: Variable count (2..3) & randomized initial positions
             std::uniform_int_distribution<int> countDist(2, 3);
             int streamCount = countDist(laneRng);
 
@@ -4242,7 +4471,6 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
             }
         }
         else if (lane.type == LaneType::Water) {
-            // NON-PATTERNED LOG PLATFORMS: Variable count (2..4) & dynamic gaps
             std::uniform_int_distribution<int> countDist(2, 4);
             int logCount = countDist(laneRng);
 
@@ -4255,9 +4483,6 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
             }
         }
     }
-
-    // Grid-aligned player start spawn
-    m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
 }
 
 void GameplayLayer::updateElevatorSignals(float dt) {
@@ -4451,7 +4676,7 @@ private:
 
     std::string m_playerName = "HCMUS Student";
     int m_currentLevel = 1;
-    int m_maxLevel = 5;
+    int m_maxLevel = 10;
     int m_currentScore = 0;
     int m_highestScore = 0;
 
@@ -4511,7 +4736,6 @@ void HUDLayer::update(double dt, EngineContext* ctx) {
         m_currentLevel = *levelOpt;
     }
 
-    // PULL LIVE BUFF TELEMETRY FROM BLACKBOARD
     if (auto shieldOpt = ctx->blackboard.get<bool>("buffShield")) {
         m_buffShieldActive = *shieldOpt;
     }
@@ -4520,6 +4744,9 @@ void HUDLayer::update(double dt, EngineContext* ctx) {
     }
     if (auto gpaOpt = ctx->blackboard.get<float>("buffGpaTimer")) {
         m_buffGpaTimer = *gpaOpt;
+    }
+    if (auto invOpt = ctx->blackboard.get<float>("buffInvincibleTimer")) {
+        m_buffInvincibleTimer = *invOpt;
     }
 }
 
@@ -4532,7 +4759,7 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         .is_world_space = false
         });
 
-    // 2. Left Telemetry: Score & High Score
+    // 2. Left Telemetry
     TextPayload scoreText;
     scoreText.color = { 1.0f, 0.9f, 0.2f, 1.0f };
     scoreText.scale = 22.0f;
@@ -4542,7 +4769,7 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         "SCORE: %d | HIGH: %d", m_currentScore, m_highestScore);
     writeBuffer.push_command(510, 0, scoreText);
 
-    // 3. Center Telemetry: Current Level Phase
+    // 3. Center Telemetry
     TextPayload levelText;
     levelText.color = { 0.3f, 0.85f, 1.0f, 1.0f };
     levelText.scale = 24.0f;
@@ -4552,7 +4779,7 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         "LEVEL %d", m_currentLevel);
     writeBuffer.push_command(510, 0, levelText);
 
-    // 4. Right Telemetry: Student Profile
+    // 4. Right Telemetry
     TextPayload playerText;
     playerText.color = { 0.9f, 0.95f, 1.0f, 1.0f };
     playerText.scale = 20.0f;
@@ -4570,11 +4797,31 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
     float badgeHeight = 32.0f;
     float badgeGap = 10.0f;
 
-    // BADGE 1: DEADLINE SHIELD (1-TIME HIT PROTECTION)
-    if (m_buffShieldActive) {
+    // BADGE 1: ACTIVE INVINCIBILITY TIMER (TRIGGERED SHIELD)
+    if (m_buffInvincibleTimer > 0.0f) {
         float badgeW = 180.0f;
 
-        // Badge Container
+        writeBuffer.push_command(520, 0, RectPayload{
+            .dest_rect = { badgeX, badgeY, badgeW, badgeHeight },
+            .color = { 0.1f, 0.75f, 0.9f, 0.85f }, // Cyan background
+            .no_texture = true,
+            .is_world_space = false
+            });
+
+        TextPayload invText;
+        invText.color = { 1.0f, 1.0f, 1.0f, 1.0f };
+        invText.scale = 16.0f;
+        invText.position = { badgeX + (badgeW * 0.5f), badgeY + 22.0f };
+        invText.showInCenter = true;
+        std::snprintf(invText.text_content, sizeof(invText.text_content), "INVINCIBLE: %.1fs", m_buffInvincibleTimer);
+        writeBuffer.push_command(530, 0, invText);
+
+        badgeX += badgeW + badgeGap;
+    }
+    // BADGE 1 ALT: DEADLINE SHIELD READY
+    else if (m_buffShieldActive) {
+        float badgeW = 180.0f;
+
         writeBuffer.push_command(520, 0, RectPayload{
             .dest_rect = { badgeX, badgeY, badgeW, badgeHeight },
             .color = { 0.8f, 0.65f, 0.1f, 0.85f }, // Gold background
@@ -4582,19 +4829,18 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
             .is_world_space = false
             });
 
-        // Badge Text
         TextPayload shieldText;
         shieldText.color = { 1.0f, 1.0f, 1.0f, 1.0f };
         shieldText.scale = 16.0f;
         shieldText.position = { badgeX + (badgeW * 0.5f), badgeY + 22.0f };
         shieldText.showInCenter = true;
-        std::snprintf(shieldText.text_content, sizeof(shieldText.text_content), "[SHIELD: 1 HIT]");
+        std::snprintf(shieldText.text_content, sizeof(shieldText.text_content), "[SHIELD: READY]");
         writeBuffer.push_command(530, 0, shieldText);
 
         badgeX += badgeW + badgeGap;
     }
 
-    // BADGE 2: SPEED BOOST (COUNTDOWN TIMER)
+    // BADGE 2: SPEED BOOST
     if (m_buffSpeedTimer > 0.0f) {
         float badgeW = 180.0f;
 
@@ -4616,7 +4862,7 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         badgeX += badgeW + badgeGap;
     }
 
-    // BADGE 3: 2X GPA MULTIPLIER (COUNTDOWN TIMER)
+    // BADGE 3: 2X GPA MULTIPLIER
     if (m_buffGpaTimer > 0.0f) {
         float badgeW = 180.0f;
 
@@ -4657,6 +4903,7 @@ private:
     bool m_buffShieldActive = false;
     float m_buffSpeedTimer = 0.0f;
     float m_buffGpaTimer = 0.0f;
+    float m_buffInvincibleTimer = 0.0f;
 
 public:
     HUDLayer() = default;
