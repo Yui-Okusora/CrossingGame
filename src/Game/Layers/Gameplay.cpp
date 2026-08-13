@@ -1,4 +1,4 @@
-#include "Gameplay.hpp"
+﻿#include "Gameplay.hpp"
 #include "../Entities/GoalEntity.hpp"
 #include "../Entities/BenchEntity.hpp"
 #include "../Entities/BusEntity.hpp"
@@ -148,14 +148,14 @@ void GameplayLayer::generateLanesForLevel(int level) {
 
 void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
     // --- FIX: Spawn player first to pass reference to teachers ---
-    m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
+    m_player = m_scene.spawn<StudentPlayerEntity>(ctx, glm::vec2(576.0f, m_playerStartY), this);
 
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const auto& lane = m_lanes[i];
         std::mt19937 laneRng(lane.seed);
 
         if (i == m_lanes.size() - 1) {
-            m_scene.spawn<GoalEntity>(glm::vec2(0.0f, lane.yPosition));
+            m_scene.spawn<GoalEntity>(ctx, glm::vec2(0.0f, lane.yPosition));
         }
         else if (lane.type == LaneType::SafeZone && i > 0) {
             std::uniform_int_distribution<int> benchCountDist(1, 3);
@@ -167,7 +167,7 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
 
             for (int b = 0; b < benchCount; ++b) {
                 float benchX = validTileCols[b] * 64.0f;
-                m_scene.spawn<BenchEntity>(glm::vec2(benchX, lane.yPosition));
+                m_scene.spawn<BenchEntity>(ctx, glm::vec2(benchX, lane.yPosition));
             }
 
             std::uniform_int_distribution<int> buffTypeDist(0, 2);
@@ -177,6 +177,7 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
             float patrolEndX = (validTileCols[benchCount + 1] * 64.0f);
 
             auto* teacher = m_scene.spawn<TeacherNPCEntity>(
+                ctx,
                 glm::vec2(patrolStartX, lane.yPosition),
                 glm::vec2(patrolEndX, lane.yPosition),
                 randomBuff
@@ -195,11 +196,11 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
 
             for (int b = 0; b < busCount; ++b) {
                 float x = (b * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
-                m_scene.spawn<BusEntity>(glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+                m_scene.spawn<BusEntity>(ctx, glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
             }
         }
         else if (lane.type == LaneType::ElevatorTile) {
-            auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
+            auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(ctx, glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
             m_elevatorCrowds.push_back(crowd);
         }
         else if (lane.type == LaneType::IDELane) {
@@ -211,7 +212,7 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
 
             for (int c = 0; c < streamCount; ++c) {
                 float x = (c * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
-                m_scene.spawn<CodeStreamEntity>(glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+                m_scene.spawn<CodeStreamEntity>(ctx, glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
             }
         }
         else if (lane.type == LaneType::Water) {
@@ -223,7 +224,7 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
 
             for (int l = 0; l < logCount; ++l) {
                 float x = (l * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
-                m_scene.spawn<LogPlatformEntity>(glm::vec2(std::fmod(x, 1050.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+                m_scene.spawn<LogPlatformEntity>(ctx, glm::vec2(std::fmod(x, 1050.0f), lane.yPosition), lane.moveSpeed, lane.direction);
             }
         }
     }

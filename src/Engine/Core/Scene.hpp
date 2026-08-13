@@ -152,6 +152,8 @@ public:
     virtual ~Entity2D() = default;
 
     // --- Pure Event Callbacks ---
+    virtual void onAttach(EngineContext* ctx) {}
+    virtual void onDetach(EngineContext* ctx) {}
     virtual void onUpdate(float dt, EngineContext* ctx) {}
     virtual void onCollision(const CollisionInfo& collision, EngineContext* ctx) {}
     virtual void onTrigger(const CollisionInfo& trigger, EngineContext* ctx) {}
@@ -171,10 +173,13 @@ public:
     Scene2D() { m_rawQueryBuffer.reserve(32); }
 
     template<typename T, typename... Args>
-    T* spawn(Args&&... args) {
+    T* spawn(EngineContext* ctx, Args&&... args) {
         auto entity = std::make_unique<T>(std::forward<Args>(args)...);
         entity->id = m_nextEntityId++;
         T* ptr = entity.get();
+
+        ptr->onAttach(ctx);
+
         m_entities.push_back(std::move(entity));
         return ptr;
     }
@@ -227,6 +232,11 @@ public:
         }
 
         // 3. Clean up inactive entities
+        for (auto& entity : m_entities) {
+            if (!entity->active) {
+                entity->onDetach(ctx);
+            }
+        }
         std::erase_if(m_entities, [](const auto& e) { return !e->active; });
     }
 
