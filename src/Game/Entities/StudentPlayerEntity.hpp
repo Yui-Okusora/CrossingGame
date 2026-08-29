@@ -10,7 +10,7 @@ struct PlayerConfig {
     float lerpSpeed = 22.0f;
     float minX = 0.0f;
     float maxX = 1152.0f;
-    float maxY = 700.0f;
+    float maxY = 741.0f;
     glm::vec2 visualOffset{ 10.0f, 10.0f };
     glm::vec4 color{ 0.0f, 0.85f, 1.0f, 1.0f };
     int32_t renderDepth = 50;
@@ -23,8 +23,8 @@ private:
 
     glm::vec2 m_targetPosition{ 0.0f, 0.0f };
     bool m_isMoving = false;
+    bool m_hasStartedFirstMove = false; // Tracks first player movement
 
-    // Input Buffering
     glm::vec2 m_inputBuffer{ 0.0f, 0.0f };
     float m_bufferTimer = 0.0f;
     static constexpr float INPUT_BUFFER_DURATION = 0.18f;
@@ -32,14 +32,12 @@ private:
     bool m_touchingLogThisFrame = false;
     bool m_isDead = false;
 
-    // --- BUFF SYSTEM TIMERS & CHARGES ---
-    bool m_hasShield = false;            // 1-time hit protection shield
-    float m_speedBoostTimer = 0.0f;      // Speed boost duration timer
-    float m_gpaMultiplierTimer = 0.0f;   // 2X GPA multiplier duration timer
-    float m_invincibilityTimer = 0.0f;   // Invincibility duration timer (granted on shield pop)
+    bool m_hasShield = false;
+    float m_speedBoostTimer = 0.0f;
+    float m_gpaMultiplierTimer = 0.0f;
+    float m_invincibilityTimer = 0.0f;
     int m_scoreMultiplier = 1;
-
-    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f; // 2 seconds i-frames
+    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f;
 
 public:
     bool isOnWaterLane = false;
@@ -47,13 +45,14 @@ public:
 
     StudentPlayerEntity(const glm::vec2& startPos, GameplayLayer* layerPtr, const PlayerConfig& config = PlayerConfig{});
 
+    void onAttach(EngineContext* ctx) override;
     [[nodiscard]] bool isMoving() const noexcept { return m_isMoving; }
+    [[nodiscard]] bool hasStartedFirstMove() const noexcept { return m_hasStartedFirstMove; }
     [[nodiscard]] bool hasShield() const noexcept { return m_hasShield; }
     [[nodiscard]] bool isInvincible() const noexcept { return m_invincibilityTimer > 0.0f; }
     [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
 
     void applyBuff(TeacherBuffType buffType);
-
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;
     void postPhysicsUpdate(float dt, EngineContext* ctx);

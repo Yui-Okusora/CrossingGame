@@ -39,6 +39,7 @@ public:
         int32_t renderDepth = 40);
 
     void setSignal(SignalState signal);
+    void onAttach(EngineContext* ctx) override;
     void onUpdate(float dt, EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 

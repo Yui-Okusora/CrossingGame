@@ -1,63 +1,114 @@
 #include "MainMenu.hpp"
 #include "SettingsLayer.hpp"
 #include "SaveLoadLayer.hpp"
+#include "ModeSelectLayer.hpp"
 #include "HUD.hpp"
 #include "Gameplay.hpp"
 
-void NameInputLayer::onAttach(EngineContext* ctx) {}
-void NameInputLayer::onDetach(EngineContext* ctx) {}
-void NameInputLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {}
-void NameInputLayer::update(double dt, EngineContext* ctx) {}
+// ============================================================================
+// NAME INPUT SCREEN
+// ============================================================================
 void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    writeBuffer.push_command(100, 0, RectPayload{ .dest_rect = {0, 0, 1200, 805}, .color = {0.08f, 0.1f, 0.12f, 1.0f}, .no_texture = true });
+    TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
 
-    ctx->ui.TextBox(writeBuffer, ctx, ID_NAME_TextBox, { 450.0f, 320.0f, 300.0f, 50.0f }, m_playerName, m_cursorPos);
+    // 1. Fullscreen Main Menu Backdrop
+    writeBuffer.push_command(50, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = bg,
+        .no_texture = false,
+        .is_world_space = false
+        });
 
-    // SWAP: NameInput -> Gameplay + HUD
-    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Confirm, { 450.0f, 400.0f, 300.0f, 50.0f }, "START GAMEPLAY")) {
+    // Dark Dimming Overlay
+    writeBuffer.push_command(55, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 0.0f, 0.0f, 0.0f, 0.65f },
+        .no_texture = true,
+        .is_world_space = false
+        });
+
+    // 2. Dark Slate Modal Box
+    glm::vec4 panelBounds{ 380.0f, 220.0f, 440.0f, 350.0f };
+    writeBuffer.push_command(60, 0, RectPayload{
+        .dest_rect = panelBounds,
+        .color = { 0.12f, 0.15f, 0.20f, 0.98f },
+        .no_texture = true,
+        .is_world_space = false
+        });
+
+    // Modal Border Lines
+    glm::vec4 borderCol{ 0.28f, 0.35f, 0.46f, 1.0f };
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x + panelBounds.z, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y + panelBounds.w}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+
+    // 3. Header Title
+    TextPayload title{
+        .position = { panelBounds.x + (panelBounds.z * 0.5f), panelBounds.y + 35.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 24.0f,
+        .showInCenter = true
+    };
+    std::snprintf(title.text_content, sizeof(title.text_content), "STUDENT PROFILE");
+    writeBuffer.push_command(70, 0, title);
+
+    // 4. Text Input Box & Action Buttons
+    float btnX = panelBounds.x + 40.0f;
+    float btnW = panelBounds.z - 80.0f;
+
+    ctx->ui.TextBox(writeBuffer, ctx, ID_NAME_TextBox, { btnX, panelBounds.y + 85.0f, btnW, 50.0f }, m_playerName, m_cursorPos, 20.0f);
+
+    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Confirm, { btnX, panelBounds.y + 175.0f, btnW, 45.0f }, "CONFIRM", 20.0f)) {
         ctx->blackboard.set("playerName", m_playerName);
-        ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
-        ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
-        ctx->layerStack->deferDetach(this); // SWAP OUT
+        ctx->layerStack->deferAttach(std::make_unique<ModeSelectLayer>());
+        ctx->layerStack->deferDetach(this);
+        return;
     }
 
-    // SWAP: NameInput -> MainMenu
-    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Back, { 450.0f, 470.0f, 300.0f, 45.0f }, "BACK")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Back, { btnX, panelBounds.y + 245.0f, btnW, 45.0f }, "BACK", 20.0f)) {
         ctx->layerStack->deferAttach(std::make_unique<MainMenuLayer>());
-        ctx->layerStack->deferDetach(this); // SWAP OUT
+        ctx->layerStack->deferDetach(this);
     }
 }
 
-void MainMenuLayer::onAttach(EngineContext* ctx) {}
-void MainMenuLayer::onDetach(EngineContext* ctx) {}
-void MainMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {}
-void MainMenuLayer::update(double dt, EngineContext* ctx) {}
+// ============================================================================
+// MAIN MENU SCREEN
+// ============================================================================
 void MainMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    writeBuffer.push_command(100, 0, RectPayload{ .dest_rect = {0, 0, 1200, 805}, .color = {0.08f, 0.12f, 0.1f, 1.0f}, .no_texture = true });
+    TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
+    TextureHandle playBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Play button.png");
+    TextureHandle continueBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Continue button.png");
+    TextureHandle optionBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Option button.png");
+    TextureHandle exitBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Exit button.png");
 
-    // SWAP: MainMenu -> NameInput
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Start, { 470.0f, 280.0f, 260.0f, 55.0f }, "START")) {
+    writeBuffer.push_command(50, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = bg,
+        .no_texture = false,
+        .is_world_space = false
+        });
+
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Start, { 470.0f, 380.0f, 260.0f, 65.0f }, playBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<NameInputLayer>());
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    // SWAP: MainMenu -> LoadMenu
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Continue, { 470.0f, 355.0f, 260.0f, 55.0f }, "CONTINUE")) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Continue, { 470.0f, 455.0f, 260.0f, 65.0f }, continueBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<LoadMenuLayer>());
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    // ADD FRONT / DIS INPUT -> Push Settings Overlay on top of MainMenu
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Settings, { 470.0f, 430.0f, 260.0f, 55.0f }, "SETTINGS")) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Settings, { 470.0f, 530.0f, 260.0f, 65.0f }, optionBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<SettingsMenuLayer>());
         return;
     }
 
-    // EXIT
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Exit, { 470.0f, 505.0f, 260.0f, 55.0f }, "EXIT")) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Exit, { 470.0f, 605.0f, 260.0f, 65.0f }, exitBtn, { 2, 1 })) {
         ctx->isRunning.store(false, std::memory_order_relaxed);
-        return;
     }
 }

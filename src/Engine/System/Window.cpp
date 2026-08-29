@@ -43,6 +43,10 @@ void Window::applySettings()
     glfwSetWindowAttrib(m_handle, GLFW_RESIZABLE, m_specs.resizable);
     glfwSetWindowAttrib(m_handle, GLFW_DECORATED, !m_specs.fullscreen);
 
+    if (m_specs.resizable && !m_specs.fullscreen) {
+        glfwSetWindowAspectRatio(m_handle, m_specs.width, m_specs.height);
+    }
+
     glfwSetWindowMonitor(m_handle, m_specs.fullscreen ? glfwGetPrimaryMonitor() : NULL, 100, 100, m_specs.width, m_specs.height, m_specs.fps);
 }
 

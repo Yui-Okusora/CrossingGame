@@ -20,8 +20,6 @@ void UIContext::update_system_states(EngineContext* ctx) {
     };
 
     ctx->collisionWorld.query_point(virtualMouse, Layer_None, Layer_UI, scratchpad);
-
-    // Pick the top-most registered collider (last element added)
     hot_id = scratchpad.empty() ? 0 : scratchpad.back().targetId;
 
     if (ctx->input.isMouseButtonJustPressed(GLFW_MOUSE_BUTTON_LEFT)) {
@@ -39,61 +37,136 @@ void UIContext::update_system_states(EngineContext* ctx) {
 }
 
 bool UIContext::Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, const char* label, float textScale) {
-    // Only register UI colliders if input is enabled for this layer
-    if (input_enabled) {
-        ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
-    }
+    if (input_enabled) ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
 
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
-
     glm::vec4 activeColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } :
         state.hovered ? glm::vec4{ 0.25f, 0.28f, 0.35f, 1.0f } : glm::vec4{ 0.18f, 0.19f, 0.22f, 1.0f };
 
-    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = bounds, .color = activeColor, .no_texture = true });
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = bounds,
+        .color = activeColor,
+        .no_texture = true,
+        .is_world_space = false
+        });
 
     if (label && label[0] != '\0') {
         glm::vec2 centerPoint{ bounds.x + (bounds.z * 0.5f), bounds.y + (bounds.w * 0.5f) };
-        TextPayload txt{ .position = centerPoint, .color = {1, 1, 1, 1}, .scale = textScale, .showInCenter = true };
+        TextPayload txt{
+            .position = centerPoint,
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .scale = textScale,
+            .showInCenter = true
+        };
         snprintf(txt.text_content, sizeof(txt.text_content), "%s", label);
         writeBuffer.push_command(910, 0, txt);
     }
 
-    if (state.clicked) {
-        clicked_id = 0; // Consume click event so lower layers cannot receive it
+    if (state.clicked) clicked_id = 0;
+    return state.clicked;
+}
+
+bool UIContext::TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+    const glm::vec4& bounds, TextureHandle texture, const char* label, float textScale) {
+    return TexturedButton(writeBuffer, ctx, id, bounds, texture, glm::uvec2{ 1, 1 }, label, textScale);
+}
+
+bool UIContext::TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+    const glm::vec4& bounds, TextureHandle texture, glm::uvec2 atlasDims, const char* label, float textScale) {
+    if (input_enabled) ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
+
+    UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
+
+    uint32_t col = (atlasDims.x > 1 && (state.hovered || state.pressed)) ? 1 : 0;
+    glm::vec4 tint = state.pressed ? glm::vec4{ 0.85f, 0.85f, 0.85f, 1.0f } : glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = bounds,
+        .color = tint,
+        .texture = texture,
+        .atlas_dimensions = atlasDims,
+        .atlas_pos = { col, 0 },
+        .no_texture = false,
+        .is_world_space = false
+        });
+
+    if (label && label[0] != '\0') {
+        glm::vec2 centerPoint{ bounds.x + (bounds.z * 0.5f), bounds.y + (bounds.w * 0.5f) };
+        TextPayload txt{
+            .position = centerPoint,
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .scale = textScale,
+            .showInCenter = true
+        };
+        snprintf(txt.text_content, sizeof(txt.text_content), "%s", label);
+        writeBuffer.push_command(910, 0, txt);
     }
 
+    if (state.clicked) clicked_id = 0;
     return state.clicked;
 }
 
 bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& value) {
     if (input_enabled) {
-        ctx->collisionWorld.register_collider(id, trackBounds, Layer_UI);
+        // Expand interactive hitbox vertically for effortless mouse tracking
+        glm::vec4 hitBounds{ trackBounds.x, trackBounds.y - 8.0f, trackBounds.z, trackBounds.w + 16.0f };
+        ctx->collisionWorld.register_collider(id, hitBounds, Layer_UI);
     }
 
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
 
     if (state.pressed) {
-        float relativeX = ctx->input.getMousePosition().x - trackBounds.x;
+        const auto& vp = ctx->currentViewport;
+        glm::vec2 virtualMouse{
+            (ctx->input.getMousePosition().x - vp.offset.x) / vp.scale,
+            (ctx->input.getMousePosition().y - vp.offset.y) / vp.scale
+        };
+        float relativeX = virtualMouse.x - trackBounds.x;
         value = std::clamp(relativeX / trackBounds.z, 0.0f, 1.0f);
     }
 
-    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = trackBounds, .color = {0.06f, 0.06f, 0.08f, 1.0f}, .no_texture = true });
+    // 1. Background Groove
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = trackBounds,
+        .color = { 0.05f, 0.06f, 0.08f, 1.0f },
+        .no_texture = true,
+        .is_world_space = false
+        });
 
-    float knobX = trackBounds.x + (trackBounds.z * value) - 8.0f;
-    float knobY = trackBounds.y + (trackBounds.w * 0.5f) - 15.0f;
-    glm::vec4 knobColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } : glm::vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
+    // 2. Active Fill Bar
+    if (value > 0.005f) {
+        writeBuffer.push_command(905, 0, RectPayload{
+            .dest_rect = { trackBounds.x, trackBounds.y, trackBounds.z * value, trackBounds.w },
+            .color = { 0.95f, 0.65f, 0.15f, 1.0f }, // Gold/Orange accent
+            .no_texture = true,
+            .is_world_space = false
+            });
+    }
 
-    writeBuffer.push_command(910, 0, RectPayload{ .dest_rect = {knobX, knobY, 16.0f, 30.0f}, .color = knobColor, .no_texture = true });
+    // 3. Thumb / Knob Indicator
+    float knobWidth = 14.0f;
+    float knobHeight = trackBounds.w + 12.0f;
+    float knobX = trackBounds.x + (trackBounds.z * value) - (knobWidth * 0.5f);
+    float knobY = trackBounds.y - 6.0f;
+
+    glm::vec4 knobColor = state.pressed ? glm::vec4{ 1.0f, 0.85f, 0.3f, 1.0f }
+        : state.hovered ? glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+    : glm::vec4{ 0.82f, 0.85f, 0.9f, 1.0f };
+
+    writeBuffer.push_command(910, 0, RectPayload{
+        .dest_rect = { knobX, knobY, knobWidth, knobHeight },
+        .color = knobColor,
+        .no_texture = true,
+        .is_world_space = false
+        });
+
     return state.pressed;
 }
 
 void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, std::string& text, uint32_t& cursor, float textScale) {
-    if (input_enabled) {
-        ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
-    }
+    if (input_enabled) ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
 
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
-
     static uint32_t lastFocusedId = 0;
     static double nextBackspaceTime = 0.0;
 
@@ -103,7 +176,7 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
     }
 
     if (state.focused) {
-        if (text == "Type Here...") { text.clear(); cursor = 0; }
+        if (text == "Student Name" || text == "Type Here...") { text.clear(); cursor = 0; }
         for (uint8_t i = 0; i < ctx->input.unicode_count; ++i) {
             uint32_t cp = ctx->input.unicode_queue[i];
             if (cp >= 32 && cp <= 126 && text.size() < 30) {
@@ -111,28 +184,25 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
             }
         }
 
-        constexpr double INITIAL_DELAY = 0.40;
-        constexpr double REPEAT_RATE = 0.04;
-
         if (ctx->input.isKeyJustPressed(GLFW_KEY_BACKSPACE)) {
-            if (cursor > 0) {
-                text.erase(text.begin() + (--cursor));
-            }
-            nextBackspaceTime = ctx->getTime() + INITIAL_DELAY;
+            if (cursor > 0) text.erase(text.begin() + (--cursor));
+            nextBackspaceTime = ctx->getTime() + 0.40;
         }
         else if (ctx->input.isKeyHeld(GLFW_KEY_BACKSPACE)) {
-            double currentTime = ctx->getTime();
-            if (currentTime >= nextBackspaceTime) {
-                if (cursor > 0) {
-                    text.erase(text.begin() + (--cursor));
-                }
-                nextBackspaceTime = currentTime + REPEAT_RATE;
+            if (ctx->getTime() >= nextBackspaceTime) {
+                if (cursor > 0) text.erase(text.begin() + (--cursor));
+                nextBackspaceTime = ctx->getTime() + 0.04;
             }
         }
     }
 
     glm::vec4 borderColor = state.focused ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } : glm::vec4{ 0.2f, 0.22f, 0.26f, 1.0f };
-    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = bounds, .color = {0.02f, 0.02f, 0.03f, 1.0f}, .no_texture = true });
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = bounds,
+        .color = { 0.02f, 0.02f, 0.03f, 0.9f },
+        .no_texture = true,
+        .is_world_space = false
+        });
     writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y}, {bounds.x + bounds.z, bounds.y}, borderColor, 2.0f });
     writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y}, {bounds.x, bounds.y + bounds.w}, borderColor, 2.0f });
     writeBuffer.push_command(905, 0, LinePayload{ {bounds.x + bounds.z, bounds.y}, {bounds.x + bounds.z, bounds.y + bounds.w}, borderColor, 2.0f });
@@ -141,41 +211,11 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
     float baselineY = bounds.y + bounds.w - ((bounds.w - textScale) * 0.5f);
     glm::vec2 textPos{ bounds.x + 12.0f, baselineY };
 
-    TextPayload txt{ .position = textPos, .color = {0.95f, 0.95f, 1.0f, 1.0f}, .scale = textScale };
+    TextPayload txt{
+        .position = textPos,
+        .color = { 0.95f, 0.95f, 1.0f, 1.0f },
+        .scale = textScale
+    };
     snprintf(txt.text_content, sizeof(txt.text_content), "%s", text.c_str());
     writeBuffer.push_command(910, 0, txt);
-
-    if (state.focused && ctx->globalFont.packedCharsBuffer) {
-        const auto* packedChars = static_cast<const stbtt_packedchar*>(ctx->globalFont.packedCharsBuffer);
-
-        constexpr float baseBakedFontHeight = 96.0f;
-        float fontScale = textScale / baseBakedFontHeight;
-        constexpr float fontSpacing = 4.0f;
-
-        float cursorOffset = 0.0f;
-        size_t sampleLength = std::min<size_t>(cursor, text.size());
-
-        for (size_t i = 0; i < sampleLength; ++i) {
-            char c = text[i];
-            if (c == ' ') {
-                float spaceAdvance = (ctx->globalFont.spaceSize > 0.0f) ? ctx->globalFont.spaceSize : packedChars[0].xadvance;
-                cursorOffset += (spaceAdvance * fontScale) + fontSpacing;
-            }
-            else if (c >= ' ' && c <= '~') {
-                float advance = packedChars[c - 32].xadvance;
-                cursorOffset += (advance * fontScale) + fontSpacing;
-            }
-        }
-
-        float cursorX = textPos.x + cursorOffset;
-
-        if (static_cast<int>(ctx->getTime() * 4.0) % 2 == 0) {
-            writeBuffer.push_command(920, 0, LinePayload{
-                {cursorX, baselineY + 2.0f},
-                {cursorX, baselineY - textScale + 2.0f},
-                {0.1f, 0.45f, 0.75f, 1.0f},
-                2.0f
-                });
-        }
-    }
 }

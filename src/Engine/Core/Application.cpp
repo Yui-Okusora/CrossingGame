@@ -89,7 +89,7 @@ void Application::run() {
 
         RenderData& renderData = m_ctx.renderBuffer.getReadBuffer();
 
-        m_gl2dRenderer.clearScreen({ 0, 0, 1, 1 }); // Clear frame baseline color
+        m_gl2dRenderer.clearScreen({ 0.0f, 0.0f, 0.0f, 1.0f }); // Clear frame baseline color
 
         std::sort(renderData.commands.begin(), renderData.commands.end(),
             [](const RenderCommand& a, const RenderCommand& b) noexcept {

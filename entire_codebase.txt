@@ -64,6 +64,7 @@
                 GoalEntity.hpp
                 LogPlatformEntity.cpp
                 LogPlatformEntity.hpp
+                MovingHazardEntity.hpp
                 StudentPlayerEntity.cpp
                 StudentPlayerEntity.hpp
                 TeacherNPCEntity.cpp
@@ -77,6 +78,8 @@
                 LaneData.hpp
                 MainMenu.cpp
                 MainMenu.hpp
+                ModeSelectLayer.cpp
+                ModeSelectLayer.hpp
                 PauseMenu.cpp
                 PauseMenu.hpp
                 SaveLoadLayer.cpp
@@ -140,7 +143,25 @@ add_executable (CrossingGame
 
     # Mathematical Utilities
     "src/Engine/Utils/CRC32_64/CRC32_64.cpp"
-  "src/Engine/Graphics/RenderStream.cpp" "src/Game/Layers/MainMenu.cpp" "src/Game/Layers/Gameplay.cpp" "src/Game/Layers/HUD.cpp" "src/Game/Layers/PauseMenu.cpp" "src/Game/Layers/SaveLoadLayer.cpp" "src/Game/Layers/SettingsLayer.cpp" "src/Game/Layers/WinLoseLayer.cpp"  "src/Game/Data/GameStateData.cpp" "src/Game/Entities/GoalEntity.cpp" "src/Game/Entities/BenchEntity.cpp" "src/Game/Entities/BusEntity.cpp" "src/Game/Entities/ElevatorCrowdEntity.cpp" "src/Game/Entities/CodeStreamEntity.cpp" "src/Game/Entities/LogPlatformEntity.cpp" "src/Game/Entities/StudentPlayerEntity.cpp" "src/Game/Entities/TeacherNPCEntity.cpp")
+  "src/Engine/Graphics/RenderStream.cpp"
+  "src/Game/Layers/MainMenu.cpp" 
+  "src/Game/Layers/Gameplay.cpp" 
+  "src/Game/Layers/HUD.cpp" 
+  "src/Game/Layers/PauseMenu.cpp" 
+  "src/Game/Layers/SaveLoadLayer.cpp" 
+  "src/Game/Layers/SettingsLayer.cpp" 
+  "src/Game/Layers/WinLoseLayer.cpp"  
+  "src/Game/Layers/ModeSelectLayer.cpp"  
+  "src/Game/Data/GameStateData.cpp" 
+  "src/Game/Entities/GoalEntity.cpp" 
+  "src/Game/Entities/BenchEntity.cpp" 
+  "src/Game/Entities/BusEntity.cpp" 
+  "src/Game/Entities/ElevatorCrowdEntity.cpp" 
+  "src/Game/Entities/CodeStreamEntity.cpp" 
+  "src/Game/Entities/LogPlatformEntity.cpp" 
+  "src/Game/Entities/StudentPlayerEntity.cpp" 
+  "src/Game/Entities/TeacherNPCEntity.cpp"
+)
 
 target_include_directories(CrossingGame PRIVATE include/ src/)
 
@@ -1213,6 +1234,8 @@ public:
     virtual ~Entity2D() = default;
 
     // --- Pure Event Callbacks ---
+    virtual void onAttach(EngineContext* ctx) {}
+    virtual void onDetach(EngineContext* ctx) {}
     virtual void onUpdate(float dt, EngineContext* ctx) {}
     virtual void onCollision(const CollisionInfo& collision, EngineContext* ctx) {}
     virtual void onTrigger(const CollisionInfo& trigger, EngineContext* ctx) {}
@@ -1232,10 +1255,13 @@ public:
     Scene2D() { m_rawQueryBuffer.reserve(32); }
 
     template<typename T, typename... Args>
-    T* spawn(Args&&... args) {
+    T* spawn(EngineContext* ctx, Args&&... args) {
         auto entity = std::make_unique<T>(std::forward<Args>(args)...);
         entity->id = m_nextEntityId++;
         T* ptr = entity.get();
+
+        ptr->onAttach(ctx);
+
         m_entities.push_back(std::move(entity));
         return ptr;
     }
@@ -1288,6 +1314,11 @@ public:
         }
 
         // 3. Clean up inactive entities
+        for (auto& entity : m_entities) {
+            if (!entity->active) {
+                entity->onDetach(ctx);
+            }
+        }
         std::erase_if(m_entities, [](const auto& e) { return !e->active; });
     }
 
@@ -3295,26 +3326,22 @@ BenchEntity::BenchEntity(const glm::vec2& pos,
     const glm::vec4& color,
     int32_t renderDepth)
     : m_visualOffset(visualOffset), m_visualMargin(visualMargin), m_color(color), m_renderDepth(renderDepth) {
-    position = pos;
-    prevPosition = pos;
+    position = prevPosition = pos;
     size = entitySize;
     layer = CollisionLayer::Layer_Obstacle;
     mask = CollisionLayer::Layer_Player;
     isStatic = true;
 }
 
+void BenchEntity::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+    TextureHandle benchTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/Stone Bench.png");
+    animator.addAnimation("static", AnimationClip{ benchTex, { 1, 1 }, 0, 0, 1.0f, false });
+    animator.play("static");
+}
+
 void BenchEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = {
-            renderPos.x + m_visualOffset.x,
-            renderPos.y + m_visualOffset.y,
-            size.x - m_visualMargin.x,
-            size.y - m_visualMargin.y
-        },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    animator.draw(writeBuffer, ctx, renderPos + m_visualOffset, size - m_visualMargin, glm::vec4(1.0f), m_renderDepth, true);
 }
 ```
 
@@ -3340,6 +3367,7 @@ public:
         const glm::vec4& color = { 0.55f, 0.55f, 0.58f, 1.0f },
         int32_t renderDepth = 30);
 
+    void onAttach(EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 };
 ```
@@ -3367,9 +3395,37 @@ BusEntity::BusEntity(const glm::vec2& pos, float speed, int dir,
 
     m_minX = -size.x - offscreenPadding;
     m_maxX = worldWidth + offscreenPadding;
+
+    animator.flipX = (dir < 0);
+}
+
+void BusEntity::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+
+    // 1. Load the bus spritesheet texture from assets
+    TextureHandle busSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
+
+    // 2. Register driving animation clip (adjust atlasDimensions/frames to match your sheet layout)
+    animator.addAnimation("drive", AnimationClip{
+        .texture = busSheet,
+        .atlasDimensions = { 4, 1 }, // {Columns, Rows}
+        .startFrame = 0,
+        .endFrame = 3,
+        .frameDuration = 0.1f,
+        .loop = true
+        });
+
+    animator.play("drive");
 }
 
 void BusEntity::onUpdate(float dt, EngineContext* ctx) {
+    // 1. Align flip orientation with direction of velocity
+    if (velocity.x != 0.0f) {
+        animator.flipX = (velocity.x < 0.0f);
+        animator.play("drive");
+    }
+
+    // 2. Screen wrapping logic
     if (velocity.x > 0.0f && position.x > m_maxX) {
         position.x = m_minX;
         prevPosition.x = m_minX;
@@ -3381,12 +3437,16 @@ void BusEntity::onUpdate(float dt, EngineContext* ctx) {
 }
 
 void BusEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x, renderPos.y + m_visualYOffset, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    // Render current animated frame using Animator2D
+    animator.draw(
+        writeBuffer,
+        ctx,
+        { renderPos.x, renderPos.y + m_visualYOffset },
+        size,
+        m_color,
+        m_renderDepth,
+        true // World space coordinates
+    );
 }
 ```
 
@@ -3402,7 +3462,7 @@ private:
     float m_minX = 0.0f;
     float m_maxX = 0.0f;
     float m_visualYOffset = 8.0f;
-    glm::vec4 m_color{ 0.85f, 0.2f, 0.2f, 1.0f };
+    glm::vec4 m_color{ 1.0f, 1.0f, 1.0f, 1.0f };
     int32_t m_renderDepth = 40;
 
 public:
@@ -3411,9 +3471,10 @@ public:
         float worldWidth = 1200.0f,
         float offscreenPadding = 50.0f,
         float visualYOffset = 8.0f,
-        const glm::vec4& color = { 0.85f, 0.2f, 0.2f, 1.0f },
+        const glm::vec4& color = { 1.0f, 1.0f, 1.0f, 1.0f },
         int32_t renderDepth = 40);
 
+    void onAttach(EngineContext* ctx) override;
     void onUpdate(float dt, EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 };
@@ -3646,8 +3707,7 @@ GoalEntity::GoalEntity(const glm::vec2& pos,
     const glm::vec4& bannerColor,
     int32_t renderDepth)
     : m_color(bannerColor), m_renderDepth(renderDepth) {
-    position = pos;
-    prevPosition = pos;
+    position = prevPosition = pos;
     size = entitySize;
     layer = CollisionLayer::Layer_TriggerVolume;
     mask = CollisionLayer::Layer_Player;
@@ -3655,13 +3715,15 @@ GoalEntity::GoalEntity(const glm::vec2& pos,
     isStatic = true;
 }
 
+void GoalEntity::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+    TextureHandle goalTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/LevelUpLine.png");
+    animator.addAnimation("static", AnimationClip{ goalTex, { 1, 1 }, 0, 0, 1.0f, false });
+    animator.play("static");
+}
+
 void GoalEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x, renderPos.y, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    animator.draw(writeBuffer, ctx, renderPos, size, glm::vec4(1.0f), m_renderDepth, true);
 }
 ```
 
@@ -3683,6 +3745,7 @@ public:
         const glm::vec4& bannerColor = { 0.9f, 0.75f, 0.1f, 0.85f },
         int32_t renderDepth = 20);
 
+    void onAttach(EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 };
 ```
@@ -3764,6 +3827,74 @@ public:
 ```
 
 // ==========================================
+// FILE: src\Game\Entities\MovingHazardEntity.hpp
+// ==========================================
+```cpp
+#pragma once
+#include <Engine/Engine.hpp>
+
+class MovingHazardEntity : public Entity2D {
+private:
+    float m_minX = 0.0f;
+    float m_maxX = 0.0f;
+    float m_visualYOffset = 0.0f;
+    glm::vec4 m_tint{ 1.0f, 1.0f, 1.0f, 1.0f };
+    int32_t m_renderDepth = 40;
+
+public:
+    MovingHazardEntity(const glm::vec2& pos, float speed, int dir, const glm::vec2& entitySize,
+        uint32_t colLayer, uint32_t colMask, bool trigger = false,
+        float visualYOffset = 0.0f, const glm::vec4& tint = glm::vec4(1.0f),
+        int32_t renderDepth = 40, float worldWidth = 1200.0f, float padding = 60.0f)
+        : m_visualYOffset(visualYOffset), m_tint(tint), m_renderDepth(renderDepth) {
+        position = pos;
+        prevPosition = pos;
+        size = entitySize;
+        velocity = glm::vec2(speed * static_cast<float>(dir), 0.0f);
+        layer = colLayer;
+        mask = colMask;
+        isTrigger = trigger;
+
+        m_minX = -size.x - padding;
+        m_maxX = worldWidth + padding;
+
+        animator.flipX = (dir < 0);
+    }
+
+    void onUpdate(float dt, EngineContext* ctx) override {
+        if (velocity.x != 0.0f) {
+            animator.flipX = (velocity.x < 0.0f);
+        }
+
+        // Screen wrapping logic
+        if (velocity.x > 0.0f && position.x > m_maxX) {
+            position.x = m_minX;
+            prevPosition.x = m_minX;
+        }
+        else if (velocity.x < 0.0f && position.x < m_minX) {
+            position.x = m_maxX;
+            prevPosition.x = m_maxX;
+        }
+    }
+
+    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override {
+        if (animator.getCurrentAnimationName().empty()) {
+            // Fallback solid color quad if no sprite animation is attached
+            writeBuffer.push_command(m_renderDepth, 0, RectPayload{
+                .dest_rect = { renderPos.x, renderPos.y + m_visualYOffset, size.x, size.y },
+                .color = m_tint,
+                .no_texture = true,
+                .is_world_space = true
+                });
+        }
+        else {
+            animator.draw(writeBuffer, ctx, { renderPos.x, renderPos.y + m_visualYOffset }, size, m_tint, m_renderDepth, true);
+        }
+    }
+};
+```
+
+// ==========================================
 // FILE: src\Game\Entities\StudentPlayerEntity.cpp
 // ==========================================
 ```cpp
@@ -3775,13 +3906,19 @@ public:
 
 StudentPlayerEntity::StudentPlayerEntity(const glm::vec2& startPos, GameplayLayer* layerPtr, const PlayerConfig& config)
     : m_gameplayLayer(layerPtr), m_config(config) {
-    position = startPos;
-    prevPosition = startPos;
-    m_targetPosition = startPos;
+    position = prevPosition = m_targetPosition = startPos;
     size = m_config.entitySize;
     layer = CollisionLayer::Layer_Player;
     mask = CollisionLayer::Layer_Enemy | CollisionLayer::Layer_Obstacle | CollisionLayer::Layer_TriggerVolume;
     isStatic = false;
+}
+
+void StudentPlayerEntity::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+    TextureHandle catSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Cat character rework - animation.png");
+    animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 0, 1, 0.35f, true });
+    animator.addAnimation("hop", AnimationClip{ catSheet, { 6, 4 }, 6, 11, 0.06f, true });
+    animator.play("idle");
 }
 
 void StudentPlayerEntity::applyBuff(TeacherBuffType buffType) {
@@ -3789,50 +3926,33 @@ void StudentPlayerEntity::applyBuff(TeacherBuffType buffType) {
     case TeacherBuffType::SpeedBoost:
         m_speedBoostTimer = 10.0f;
         m_config.lerpSpeed = 38.0f;
-        std::cout << "[Buff]: Speed Boost (10s)\n";
         break;
     case TeacherBuffType::DeadlineShield:
         m_hasShield = true;
-        std::cout << "[Buff]: Deadline Shield Activated\n";
         break;
     case TeacherBuffType::GpaMultiplier:
         m_scoreMultiplier = 2;
         m_gpaMultiplierTimer = 12.0f;
-        std::cout << "[Buff]: 2X GPA Multiplier (12s)\n";
         break;
     }
 }
 
 void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
     if (m_isDead) return;
-
     m_touchingLogThisFrame = false;
 
-    // 1. UPDATE BUFF & INVINCIBILITY TIMERS
-    if (m_speedBoostTimer > 0.0f) {
-        m_speedBoostTimer -= dt;
-        if (m_speedBoostTimer <= 0.0f) {
-            m_speedBoostTimer = 0.0f;
-            m_config.lerpSpeed = 22.0f;
-        }
+    if (m_speedBoostTimer > 0.0f && (m_speedBoostTimer -= dt) <= 0.0f) {
+        m_speedBoostTimer = 0.0f;
+        m_config.lerpSpeed = 22.0f;
+    }
+    if (m_gpaMultiplierTimer > 0.0f && (m_gpaMultiplierTimer -= dt) <= 0.0f) {
+        m_gpaMultiplierTimer = 0.0f;
+        m_scoreMultiplier = 1;
+    }
+    if (m_invincibilityTimer > 0.0f && (m_invincibilityTimer -= dt) <= 0.0f) {
+        m_invincibilityTimer = 0.0f;
     }
 
-    if (m_gpaMultiplierTimer > 0.0f) {
-        m_gpaMultiplierTimer -= dt;
-        if (m_gpaMultiplierTimer <= 0.0f) {
-            m_gpaMultiplierTimer = 0.0f;
-            m_scoreMultiplier = 1;
-        }
-    }
-
-    if (m_invincibilityTimer > 0.0f) {
-        m_invincibilityTimer -= dt;
-        if (m_invincibilityTimer <= 0.0f) {
-            m_invincibilityTimer = 0.0f;
-        }
-    }
-
-    // 2. PUBLISH TELEMETRY TO BLACKBOARD
     if (ctx) {
         ctx->blackboard.set("buffShield", m_hasShield);
         ctx->blackboard.set("buffSpeedTimer", m_speedBoostTimer);
@@ -3840,7 +3960,6 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
         ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
     }
 
-    // 3. CAPTURE INPUT
     glm::vec2 freshDir{ 0.0f, 0.0f };
     if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP))    freshDir.y -= m_config.gridSize;
     else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN))  freshDir.y += m_config.gridSize;
@@ -3851,16 +3970,12 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
         m_inputBuffer = freshDir;
         m_bufferTimer = INPUT_BUFFER_DURATION;
     }
-    else if (m_bufferTimer > 0.0f) {
-        m_bufferTimer -= dt;
-        if (m_bufferTimer <= 0.0f) {
-            m_inputBuffer = glm::vec2(0.0f, 0.0f);
-        }
+    else if (m_bufferTimer > 0.0f && (m_bufferTimer -= dt) <= 0.0f) {
+        m_inputBuffer = glm::vec2(0.0f, 0.0f);
     }
 
     if (!m_isMoving) {
         glm::vec2 dir = m_inputBuffer;
-
         if (dir == glm::vec2(0.0f, 0.0f)) {
             if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP))    dir.y -= m_config.gridSize;
             else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN))  dir.y += m_config.gridSize;
@@ -3876,19 +3991,21 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
             if (nextTarget != position) {
                 m_targetPosition = nextTarget;
                 m_isMoving = true;
+                m_hasStartedFirstMove = true; // Signal first move initiated
             }
-
             m_inputBuffer = glm::vec2(0.0f, 0.0f);
             m_bufferTimer = 0.0f;
         }
     }
 
     if (m_isMoving) {
+        animator.play("hop");
         float factor = 1.0f - std::exp(-m_config.lerpSpeed * dt);
         position = glm::mix(position, m_targetPosition, factor);
         if (glm::distance(position, m_targetPosition) < 0.5f) {
             position = m_targetPosition;
             m_isMoving = false;
+            animator.play("idle");
         }
     }
 }
@@ -3897,12 +4014,8 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
     if (m_isDead) return;
 
     if ((collision.targetLayer & CollisionLayer::Layer_Enemy) != 0) {
-        // IGNORE ENEMY HITS DURING INVINCIBILITY
-        if (m_invincibilityTimer > 0.0f) {
-            return;
-        }
+        if (m_invincibilityTimer > 0.0f) return;
 
-        // CONSUME SHIELD -> GRANT INVINCIBILITY
         if (m_hasShield) {
             m_hasShield = false;
             m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
@@ -3910,7 +4023,6 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
                 ctx->blackboard.set("buffShield", false);
                 ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
             }
-            std::cout << "[Deadline Shield]: Triggered! Granted " << SHIELD_INVINCIBILITY_DURATION << "s Invincibility!\n";
         }
         else {
             m_isDead = true;
@@ -3937,18 +4049,24 @@ void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
             m_targetPosition.x = position.x;
 
             if (position.x < m_config.minX - 20.0f || position.x > m_config.maxX + 20.0f) {
-                if (m_invincibilityTimer > 0.0f) {
-                    // Safe during i-frames
+                if (m_invincibilityTimer <= 0.0f) {
+                    if (m_hasShield) {
+                        m_hasShield = false;
+                        m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
+                        position.x = m_targetPosition.x = 576.0f;
+                    }
+                    else {
+                        m_isDead = true;
+                        if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
+                    }
                 }
-                else if (m_hasShield) {
+            }
+        }
+        else if (isOnWaterLane) {
+            if (m_invincibilityTimer <= 0.0f) {
+                if (m_hasShield) {
                     m_hasShield = false;
                     m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
-                    if (ctx) {
-                        ctx->blackboard.set("buffShield", false);
-                        ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
-                    }
-                    position.x = 576.0f;
-                    m_targetPosition.x = 576.0f;
                 }
                 else {
                     m_isDead = true;
@@ -3956,51 +4074,26 @@ void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
                 }
             }
         }
-        else if (isOnWaterLane) {
-            if (m_invincibilityTimer > 0.0f) {
-                // Safe during i-frames
-            }
-            else if (m_hasShield) {
-                m_hasShield = false;
-                m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
-                if (ctx) {
-                    ctx->blackboard.set("buffShield", false);
-                    ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
-                }
-                std::cout << "[Deadline Shield]: Rescued from drowning! Granted invincibility!\n";
-            }
-            else {
-                m_isDead = true;
-                if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
-            }
-        }
     }
 }
 
 void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_config.renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x + m_config.visualOffset.x, renderPos.y + m_config.visualOffset.y, size.x, size.y },
-        .color = m_config.color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    animator.draw(writeBuffer, ctx, renderPos + m_config.visualOffset, size, glm::vec4(1.0f), m_config.renderDepth, true);
 
-    // FLASHING CYAN INVINCIBILITY AURA WHEN TRIGGERED
     if (m_invincibilityTimer > 0.0f) {
         if (static_cast<int>(m_invincibilityTimer * 12.0f) % 2 == 0) {
             writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
                 .dest_rect = { renderPos.x + 2.0f, renderPos.y + 2.0f, size.x + 16.0f, size.y + 16.0f },
-                .color = { 0.2f, 0.9f, 1.0f, 0.6f }, // Glowing Cyan
+                .color = { 0.2f, 0.9f, 1.0f, 0.6f },
                 .no_texture = true,
                 .is_world_space = true
                 });
         }
     }
-    // SOLID GOLD AURA WHILE SHIELD IS READY
     else if (m_hasShield) {
         writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
             .dest_rect = { renderPos.x + 4.0f, renderPos.y + 4.0f, size.x + 12.0f, size.y + 12.0f },
-            .color = { 1.0f, 0.85f, 0.1f, 0.45f }, // Gold Shield
+            .color = { 1.0f, 0.85f, 0.1f, 0.45f },
             .no_texture = true,
             .is_world_space = true
             });
@@ -4037,8 +4130,8 @@ private:
 
     glm::vec2 m_targetPosition{ 0.0f, 0.0f };
     bool m_isMoving = false;
+    bool m_hasStartedFirstMove = false; // Tracks first player movement
 
-    // Input Buffering
     glm::vec2 m_inputBuffer{ 0.0f, 0.0f };
     float m_bufferTimer = 0.0f;
     static constexpr float INPUT_BUFFER_DURATION = 0.18f;
@@ -4046,14 +4139,12 @@ private:
     bool m_touchingLogThisFrame = false;
     bool m_isDead = false;
 
-    // --- BUFF SYSTEM TIMERS & CHARGES ---
-    bool m_hasShield = false;            // 1-time hit protection shield
-    float m_speedBoostTimer = 0.0f;      // Speed boost duration timer
-    float m_gpaMultiplierTimer = 0.0f;   // 2X GPA multiplier duration timer
-    float m_invincibilityTimer = 0.0f;   // Invincibility duration timer (granted on shield pop)
+    bool m_hasShield = false;
+    float m_speedBoostTimer = 0.0f;
+    float m_gpaMultiplierTimer = 0.0f;
+    float m_invincibilityTimer = 0.0f;
     int m_scoreMultiplier = 1;
-
-    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f; // 2 seconds i-frames
+    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f;
 
 public:
     bool isOnWaterLane = false;
@@ -4061,13 +4152,14 @@ public:
 
     StudentPlayerEntity(const glm::vec2& startPos, GameplayLayer* layerPtr, const PlayerConfig& config = PlayerConfig{});
 
+    void onAttach(EngineContext* ctx) override;
     [[nodiscard]] bool isMoving() const noexcept { return m_isMoving; }
+    [[nodiscard]] bool hasStartedFirstMove() const noexcept { return m_hasStartedFirstMove; }
     [[nodiscard]] bool hasShield() const noexcept { return m_hasShield; }
     [[nodiscard]] bool isInvincible() const noexcept { return m_invincibilityTimer > 0.0f; }
     [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
 
     void applyBuff(TeacherBuffType buffType);
-
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;
     void postPhysicsUpdate(float dt, EngineContext* ctx);
@@ -4214,27 +4306,32 @@ public:
 // ==========================================
 ```cpp
 #pragma once
-#include <memory>
+#include <cstdint>
 
-// ============================================================================
-// UNIQUE WIDGET IDS FOR UI ACTIONS
-// ============================================================================
+enum class GameMode : uint8_t {
+    Campaign, // 5 fixed levels with time bonus speed-runs
+    Endless   // Infinite waves with dynamic scaling speed and time-survived scoring
+};
+
 enum UIWidgetID : uint32_t {
     ID_MM_Start = 1001,
     ID_MM_Continue,
     ID_MM_Settings,
     ID_MM_Exit,
 
+    ID_MODE_Campaign = 1101,
+    ID_MODE_Endless,
+    ID_MODE_Back,
+
     ID_SET_MasterSlider = 2001,
-    ID_SET_MusicSlider,  // 2002
-    ID_SET_SFXSlider,    // 2003
-    ID_SET_Back,         // 2004
+    ID_SET_MusicSlider,
+    ID_SET_SFXSlider,
+    ID_SET_Back,
 
     ID_NAME_TextBox = 3001,
     ID_NAME_Confirm,
     ID_NAME_Back,
 
-    // Reserved range for procedural Load Slots (4000 to 4009)
     ID_LOAD_Slot_Base = 4000,
     ID_LOAD_Back = 4020,
 
@@ -4247,7 +4344,6 @@ enum UIWidgetID : uint32_t {
     ID_POP_SaveRecord = 6001,
     ID_POP_MainMenu,
 
-    // Reserved range for procedural Save Slots (7000 to 7009)
     ID_SAVE_Slot_Base = 7000,
     ID_SAVE_Back = 7020
 };
@@ -4257,36 +4353,36 @@ enum UIWidgetID : uint32_t {
 // FILE: src\Game\Layers\Gameplay.cpp
 // ==========================================
 ```cpp
-#include "Gameplay.hpp"
+﻿#include "Gameplay.hpp"
 #include "../Entities/GoalEntity.hpp"
 #include "../Entities/BenchEntity.hpp"
-#include "../Entities/BusEntity.hpp"
+#include "../Entities/MovingHazardEntity.hpp"
 #include "../Entities/ElevatorCrowdEntity.hpp"
-#include "../Entities/CodeStreamEntity.hpp"
-#include "../Entities/LogPlatformEntity.hpp"
 #include "../Entities/StudentPlayerEntity.hpp"
 #include "../Entities/TeacherNPCEntity.hpp"
 #include "WinLoseLayer.hpp"
 #include "PauseMenu.hpp"
-#include <iostream>
 #include <random>
 #include <cmath>
 #include <numeric>
 #include <algorithm>
 
 void GameplayLayer::onAttach(EngineContext* ctx) {
-    if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) {
-        m_playerName = *nameOpt;
-    }
-    if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) {
-        m_currentLevel = *levelOpt;
-    }
-    else {
-        ctx->blackboard.set("currentLevel", m_currentLevel);
-    }
+    if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) m_playerName = *nameOpt;
+    if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
+    if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
     m_currentScore = 0;
+    m_elapsedTime = 0.0f;
+    m_timerStarted = false;
     ctx->blackboard.set("currentScore", m_currentScore);
+    ctx->blackboard.set("elapsedTime", m_elapsedTime);
+
+    m_texSafeZone = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
+    m_texRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Road/Road.png");
+    m_texElevatorRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/ElevatorRoad.png");
+    m_texCodeLine = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine.png");
+    m_texWater = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/River/River.png");
 
     initLevel(m_currentLevel, ctx);
 }
@@ -4304,11 +4400,13 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
     m_elevatorCrowds.clear();
     m_isGameOver = false;
     m_isLevelComplete = false;
+    m_timerStarted = false;
 
     generateLanesForLevel(level);
 
     m_playerStartY = m_lanes.front().yPosition;
     m_goalY = m_lanes.back().yPosition;
+    m_deathBorderY = m_playerStartY + 64.0f; // Shrinking border starts below the player spawn
 
     spawnLaneEntities(ctx);
 
@@ -4319,7 +4417,6 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
 }
 
 void GameplayLayer::generateLanesForLevel(int level) {
-    // Seed main PRNG deterministically per level
     std::mt19937 rng(1337 + level * 100);
     std::uniform_real_distribution<float> speedDist(110.0f + level * 18.0f, 150.0f + level * 28.0f);
     std::uniform_real_distribution<float> offsetDist(0.0f, 320.0f);
@@ -4327,28 +4424,20 @@ void GameplayLayer::generateLanesForLevel(int level) {
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
 
-    int totalLanes = 20 + (level * 3);
+    int totalLanes = (m_mode == GameMode::Endless) ? 14 : (10 + (level * 3));
     float startY = 700.0f;
     float laneHeight = 64.0f;
 
     m_lanes.clear();
-
-    // Bottom Start Zone (Safe)
     m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
 
-    const LaneType hazardPool[] = {
-        LaneType::Asphalt,
-        LaneType::ElevatorTile,
-        LaneType::IDELane,
-        LaneType::Water
-    };
+    const LaneType hazardPool[] = { LaneType::Asphalt, LaneType::ElevatorTile, LaneType::IDELane, LaneType::Water };
 
     int currentLaneIdx = 1;
     int consecutiveHazards = 0;
     int lastDirection = 1;
     int sameDirStreak = 0;
 
-    // Procedurally generate map with grouped hazard clusters
     while (currentLaneIdx < totalLanes - 1) {
         if (consecutiveHazards >= 4) {
             float currentY = startY - (currentLaneIdx * laneHeight);
@@ -4367,51 +4456,35 @@ void GameplayLayer::generateLanesForLevel(int level) {
 
             int dir = dirDist(rng) ? 1 : -1;
             if (dir == lastDirection) {
-                sameDirStreak++;
-                if (sameDirStreak >= 2) {
-                    dir = -dir;
-                    sameDirStreak = 1;
-                }
+                if (++sameDirStreak >= 2) { dir = -dir; sameDirStreak = 1; }
             }
             else {
                 sameDirStreak = 1;
             }
             lastDirection = dir;
 
-            float xOffset = offsetDist(rng);
-
-            m_lanes.push_back({
-                currentY,
-                laneHeight,
-                selectedType,
-                speed,
-                dir,
-                xOffset,
-                rng(), // Assign unique lane seed
-                0.0f,
-                static_cast<uint8_t>(c % 3)
-                });
-
+            m_lanes.push_back({ currentY, laneHeight, selectedType, speed, dir, offsetDist(rng), rng(), 0.0f, static_cast<uint8_t>(c % 3) });
             consecutiveHazards++;
             currentLaneIdx++;
         }
     }
 
-    // Top Goal Zone (Safe)
     float goalY = startY - ((totalLanes - 1) * laneHeight);
     m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
 }
 
 void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
-    // --- FIX: Spawn player first to pass reference to teachers ---
-    m_player = m_scene.spawn<StudentPlayerEntity>(glm::vec2(576.0f, m_playerStartY), this);
+    m_player = m_scene.spawn<StudentPlayerEntity>(ctx, glm::vec2(576.0f, m_playerStartY), this);
+
+    TextureHandle busSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
+    TextureHandle teacherQuanSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png");
 
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const auto& lane = m_lanes[i];
         std::mt19937 laneRng(lane.seed);
 
         if (i == m_lanes.size() - 1) {
-            m_scene.spawn<GoalEntity>(glm::vec2(0.0f, lane.yPosition));
+            m_scene.spawn<GoalEntity>(ctx, glm::vec2(0.0f, lane.yPosition));
         }
         else if (lane.type == LaneType::SafeZone && i > 0) {
             std::uniform_int_distribution<int> benchCountDist(1, 3);
@@ -4422,101 +4495,104 @@ void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
             std::shuffle(validTileCols.begin(), validTileCols.end(), laneRng);
 
             for (int b = 0; b < benchCount; ++b) {
-                float benchX = validTileCols[b] * 64.0f;
-                m_scene.spawn<BenchEntity>(glm::vec2(benchX, lane.yPosition));
+                m_scene.spawn<BenchEntity>(ctx, glm::vec2(validTileCols[b] * 64.0f, lane.yPosition));
             }
 
             std::uniform_int_distribution<int> buffTypeDist(0, 2);
-            TeacherBuffType randomBuff = static_cast<TeacherBuffType>(buffTypeDist(laneRng));
-
-            float patrolStartX = (validTileCols[benchCount] * 64.0f);
-            float patrolEndX = (validTileCols[benchCount + 1] * 64.0f);
-
             auto* teacher = m_scene.spawn<TeacherNPCEntity>(
-                glm::vec2(patrolStartX, lane.yPosition),
-                glm::vec2(patrolEndX, lane.yPosition),
-                randomBuff
+                ctx,
+                glm::vec2(validTileCols[benchCount] * 64.0f, lane.yPosition),
+                glm::vec2(validTileCols[benchCount + 1] * 64.0f, lane.yPosition),
+                static_cast<TeacherBuffType>(buffTypeDist(laneRng))
             );
-
-            // --- FIX: Bind player pointer ---
+            teacher->animator.addAnimation("patrol", AnimationClip{ teacherQuanSheet, { 6, 4 }, 0, 5, 0.15f, true });
+            teacher->animator.play("patrol");
             teacher->setPlayer(m_player);
-            teacher->onAttach(ctx);
         }
         else if (lane.type == LaneType::Asphalt) {
-            std::uniform_int_distribution<int> countDist(1, (m_currentLevel >= 3) ? 3 : 2);
-            int busCount = countDist(laneRng);
-
-            float sectorWidth = 1100.0f / busCount;
-            std::uniform_real_distribution<float> jitterDist(0.0f, sectorWidth - 180.0f);
+            int busCount = std::uniform_int_distribution<int>(1, (m_currentLevel >= 3) ? 3 : 2)(laneRng);
+            float sector = 1100.0f / busCount;
 
             for (int b = 0; b < busCount; ++b) {
-                float x = (b * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
-                m_scene.spawn<BusEntity>(glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+                float x = std::fmod((b * sector) + lane.spawnXOffset, 1100.0f);
+                auto* bus = m_scene.spawn<MovingHazardEntity>(
+                    ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
+                    glm::vec2(130.0f, 48.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
+                    false, 8.0f, glm::vec4(1.0f), 40
+                );
+                bus->animator.addAnimation("drive", AnimationClip{ busSheet, { 4, 1 }, 0, 3, 0.1f, true });
+                bus->animator.play("drive");
             }
         }
         else if (lane.type == LaneType::ElevatorTile) {
-            auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
+            auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(ctx, glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
             m_elevatorCrowds.push_back(crowd);
         }
         else if (lane.type == LaneType::IDELane) {
-            std::uniform_int_distribution<int> countDist(2, 3);
-            int streamCount = countDist(laneRng);
+            int count = std::uniform_int_distribution<int>(2, 3)(laneRng);
+            float sector = 1100.0f / count;
 
-            float sectorWidth = 1100.0f / streamCount;
-            std::uniform_real_distribution<float> jitterDist(0.0f, sectorWidth - 150.0f);
-
-            for (int c = 0; c < streamCount; ++c) {
-                float x = (c * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
-                m_scene.spawn<CodeStreamEntity>(glm::vec2(std::fmod(x, 1100.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+            for (int c = 0; c < count; ++c) {
+                float x = std::fmod((c * sector) + lane.spawnXOffset, 1100.0f);
+                m_scene.spawn<MovingHazardEntity>(
+                    ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
+                    glm::vec2(110.0f, 40.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
+                    false, 12.0f, glm::vec4(0.65f, 0.2f, 0.85f, 1.0f), 40
+                );
             }
         }
         else if (lane.type == LaneType::Water) {
-            std::uniform_int_distribution<int> countDist(2, 4);
-            int logCount = countDist(laneRng);
+            int count = std::uniform_int_distribution<int>(2, 4)(laneRng);
+            float sector = 1050.0f / count;
 
-            float sectorWidth = 1050.0f / logCount;
-            std::uniform_real_distribution<float> jitterDist(0.0f, (std::max)(10.0f, sectorWidth - 200.0f));
-
-            for (int l = 0; l < logCount; ++l) {
-                float x = (l * sectorWidth) + jitterDist(laneRng) + lane.spawnXOffset;
-                m_scene.spawn<LogPlatformEntity>(glm::vec2(std::fmod(x, 1050.0f), lane.yPosition), lane.moveSpeed, lane.direction);
+            for (int l = 0; l < count; ++l) {
+                float x = std::fmod((l * sector) + lane.spawnXOffset, 1050.0f);
+                m_scene.spawn<MovingHazardEntity>(
+                    ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
+                    glm::vec2(170.0f, 50.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
+                    true, 7.0f, glm::vec4(0.45f, 0.28f, 0.12f, 1.0f), 25
+                );
             }
+        }
+    }
+}
+
+void GameplayLayer::updateWaterAnimation(float dt) {
+    int totalFrames = static_cast<int>(m_waterAtlasDims.x * m_waterAtlasDims.y);
+    if (totalFrames <= 0) return;
+
+    for (auto& lane : m_lanes) {
+        if (lane.type != LaneType::Water) continue;
+        lane.waterAnimTimer += dt;
+        if (lane.waterAnimTimer >= m_waterFrameDuration) {
+            lane.waterAnimTimer -= m_waterFrameDuration;
+            lane.waterAnimFrame = static_cast<uint8_t>((lane.waterAnimFrame + 1) % totalFrames);
         }
     }
 }
 
 void GameplayLayer::updateElevatorSignals(float dt) {
     size_t crowdIdx = 0;
-
     for (auto& lane : m_lanes) {
         if (lane.type != LaneType::ElevatorTile) continue;
 
         lane.signalTimer += dt;
-
         if (lane.signalPhase == 0 && lane.signalTimer >= 3.0f) {
-            lane.signalPhase = 1;
-            lane.signalTimer = 0.0f;
+            lane.signalPhase = 1; lane.signalTimer = 0.0f;
         }
         else if (lane.signalPhase == 1 && lane.signalTimer >= 1.2f) {
-            lane.signalPhase = 2;
-            lane.signalTimer = 0.0f;
+            lane.signalPhase = 2; lane.signalTimer = 0.0f;
         }
         else if (lane.signalPhase == 2) {
-            bool crowdFinished = true;
-            if (crowdIdx < m_elevatorCrowds.size() && m_elevatorCrowds[crowdIdx]) {
-                crowdFinished = m_elevatorCrowds[crowdIdx]->hasFinishedCrossing();
-            }
-
-            if (crowdFinished) {
-                lane.signalPhase = 0;
-                lane.signalTimer = 0.0f;
+            bool finished = (crowdIdx < m_elevatorCrowds.size() && m_elevatorCrowds[crowdIdx])
+                ? m_elevatorCrowds[crowdIdx]->hasFinishedCrossing() : true;
+            if (finished) {
+                lane.signalPhase = 0; lane.signalTimer = 0.0f;
             }
         }
 
-        SignalState state = static_cast<SignalState>(lane.signalPhase);
-
         if (crowdIdx < m_elevatorCrowds.size() && m_elevatorCrowds[crowdIdx]) {
-            m_elevatorCrowds[crowdIdx]->setSignal(state);
+            m_elevatorCrowds[crowdIdx]->setSignal(static_cast<SignalState>(lane.signalPhase));
             crowdIdx++;
         }
     }
@@ -4529,9 +4605,7 @@ void GameplayLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
             if (ev.key == GLFW_KEY_P || ev.key == GLFW_KEY_ESCAPE) {
                 ctx->layerStack->deferAttach(std::make_unique<PauseMenuLayer>());
             }
-            if (ev.key == GLFW_KEY_K) {
-                triggerGameOver(ctx);
-            }
+            if (ev.key == GLFW_KEY_K) triggerGameOver(ctx);
         }
     }
 }
@@ -4541,11 +4615,40 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
 
     float fDt = static_cast<float>(dt);
 
+    // 1. TIMER TRIGGER: Only starts when the player initiates their first move
+    if (!m_timerStarted && m_player && m_player->hasStartedFirstMove()) {
+        m_timerStarted = true;
+    }
+
+    if (m_timerStarted) {
+        m_elapsedTime += fDt;
+        ctx->blackboard.set("elapsedTime", m_elapsedTime);
+
+        // 2. ENDLESS MODE: Creeping death border rises upward
+        if (m_mode == GameMode::Endless) {
+            float speed = m_deathBorderSpeed + (m_currentLevel * 4.0f);
+            m_deathBorderY -= speed * fDt;
+
+            // Kill player if caught by the shrinking bottom border
+            if (m_player && m_player->position.y >= m_deathBorderY) {
+                triggerGameOver(ctx);
+                return;
+            }
+
+            int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
+            int timeScore = static_cast<int>(m_elapsedTime * 15.0f);
+            int multiplier = m_player ? m_player->getScoreMultiplier() : 1;
+            m_currentScore = (timeScore + distanceScore) * multiplier;
+            ctx->blackboard.set("currentScore", m_currentScore);
+        }
+    }
+
     updateElevatorSignals(fDt);
+    updateWaterAnimation(fDt);
 
     if (m_player) {
         m_player->isOnWaterLane = false;
-        m_player->currentWaterVel = glm::vec2(0.0f, 0.0f);
+        m_player->currentWaterVel = glm::vec2(0.0f);
 
         for (const auto& lane : m_lanes) {
             if (lane.type == LaneType::Water &&
@@ -4562,61 +4665,82 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
 
     if (m_player) {
         m_player->postPhysicsUpdate(fDt, ctx);
-    }
 
-    if (m_player && m_player->position.y <= m_goalY + 20.0f) {
-        triggerLevelComplete(ctx);
-        return;
-    }
+        if (m_player->position.y <= m_goalY + 20.0f) {
+            triggerLevelComplete(ctx);
+            return;
+        }
 
-    if (m_player) {
         m_cameraTargetY = m_player->position.y - 450.0f;
         float factor = 1.0f - std::exp(-6.0f * fDt);
         ctx->cameraPos.y = glm::mix(ctx->cameraPos.y, m_cameraTargetY, factor);
 
-        int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
-        updateScore(distanceScore, ctx);
+        if (m_mode == GameMode::Campaign && m_timerStarted) {
+            int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
+            int multiplier = m_player->getScoreMultiplier();
+            if (distanceScore > m_currentScore) {
+                m_currentScore = distanceScore * multiplier;
+                ctx->blackboard.set("currentScore", m_currentScore);
+            }
+        }
     }
 }
 
 void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
     for (const auto& lane : m_lanes) {
-        glm::vec4 laneColor{ 0.2f, 0.2f, 0.2f, 1.0f };
-
-        switch (lane.type) {
-        case LaneType::SafeZone:     laneColor = { 0.22f, 0.45f, 0.22f, 1.0f }; break;
-        case LaneType::Asphalt:      laneColor = { 0.15f, 0.15f, 0.18f, 1.0f }; break;
-        case LaneType::ElevatorTile: laneColor = { 0.50f, 0.45f, 0.38f, 1.0f }; break;
-        case LaneType::IDELane:      laneColor = { 0.10f, 0.12f, 0.18f, 1.0f }; break;
-        case LaneType::Water:        laneColor = { 0.12f, 0.30f, 0.55f, 1.0f }; break;
+        if (lane.type == LaneType::Water) {
+            uint32_t col = lane.waterAnimFrame % m_waterAtlasDims.x;
+            uint32_t row = lane.waterAnimFrame / m_waterAtlasDims.x;
+            writeBuffer.push_command(10, 0, RectPayload{
+                .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height },
+                .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .texture = m_texWater,
+                .atlas_dimensions = m_waterAtlasDims,
+                .atlas_pos = { col, row },
+                .no_texture = false,
+                .is_world_space = true
+                });
+            continue;
         }
+
+        TextureHandle tex = (lane.type == LaneType::SafeZone) ? m_texSafeZone :
+            (lane.type == LaneType::Asphalt) ? m_texRoad :
+            (lane.type == LaneType::ElevatorTile) ? m_texElevatorRoad : m_texCodeLine;
 
         writeBuffer.push_command(10, 0, RectPayload{
             .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height },
-            .color = laneColor,
-            .no_texture = true,
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = tex,
+            .no_texture = false,
             .is_world_space = true
             });
 
         if (lane.type == LaneType::ElevatorTile) {
-            glm::vec4 signalColor = (lane.signalPhase == 0) ? glm::vec4{ 0.9f, 0.1f, 0.1f, 1.0f }
-                : (lane.signalPhase == 1) ? glm::vec4{ 0.9f, 0.8f, 0.1f, 1.0f }
-            : glm::vec4{ 0.1f, 0.9f, 0.2f, 1.0f };
+            glm::vec4 color = (lane.signalPhase == 0) ? glm::vec4{ 0.9f, 0.1f, 0.1f, 1.0f } :
+                (lane.signalPhase == 1) ? glm::vec4{ 0.9f, 0.8f, 0.1f, 1.0f } : glm::vec4{ 0.1f, 0.9f, 0.2f, 1.0f };
 
-            writeBuffer.push_command(15, 0, RectPayload{
-                .dest_rect = { 15.0f, lane.yPosition + 12.0f, 24.0f, 40.0f },
-                .color = signalColor,
-                .no_texture = true,
-                .is_world_space = true
-                });
-
-            writeBuffer.push_command(15, 0, RectPayload{
-                .dest_rect = { 1161.0f, lane.yPosition + 12.0f, 24.0f, 40.0f },
-                .color = signalColor,
-                .no_texture = true,
-                .is_world_space = true
-                });
+            writeBuffer.push_command(15, 0, RectPayload{ .dest_rect = { 15.0f, lane.yPosition + 12.0f, 24.0f, 40.0f }, .color = color, .no_texture = true, .is_world_space = true });
+            writeBuffer.push_command(15, 0, RectPayload{ .dest_rect = { 1161.0f, lane.yPosition + 12.0f, 24.0f, 40.0f }, .color = color, .no_texture = true, .is_world_space = true });
         }
+    }
+
+    // 3. Render Endless Mode Shrinking Death Border Danger Zone
+    if (m_mode == GameMode::Endless) {
+        // Red warning fog behind the creeping line
+        writeBuffer.push_command(80, 0, RectPayload{
+            .dest_rect = { 0.0f, m_deathBorderY, 1200.0f, 600.0f },
+            .color = { 0.85f, 0.1f, 0.1f, 0.45f },
+            .no_texture = true,
+            .is_world_space = true
+            });
+
+        // Glowing Laser Line
+        writeBuffer.push_command(85, 0, RectPayload{
+            .dest_rect = { 0.0f, m_deathBorderY - 4.0f, 1200.0f, 8.0f },
+            .color = { 1.0f, 0.2f, 0.2f, 0.95f },
+            .no_texture = true,
+            .is_world_space = true
+            });
     }
 
     m_scene.populateRenderStream(writeBuffer, ctx);
@@ -4631,7 +4755,18 @@ void GameplayLayer::triggerGameOver(EngineContext* ctx) {
 void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     if (m_isLevelComplete) return;
 
+    if (m_mode == GameMode::Endless) {
+        m_currentLevel++;
+        ctx->blackboard.set("currentLevel", m_currentLevel);
+        initLevel(m_currentLevel, ctx);
+        return;
+    }
+
     if (m_currentLevel < m_maxLevel) {
+        int timeBonus = (std::max)(0, static_cast<int>(1000.0f - (m_elapsedTime * 20.0f)));
+        m_currentScore += timeBonus;
+        ctx->blackboard.set("currentScore", m_currentScore);
+
         m_currentLevel++;
         ctx->blackboard.set("currentLevel", m_currentLevel);
         initLevel(m_currentLevel, ctx);
@@ -4641,23 +4776,13 @@ void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
         ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
     }
 }
-
-void GameplayLayer::updateScore(int newScore, EngineContext* ctx) {
-    if (m_player) {
-        newScore *= m_player->getScoreMultiplier();
-    }
-    if (newScore > m_currentScore) {
-        m_currentScore = newScore;
-        ctx->blackboard.set("currentScore", m_currentScore);
-    }
-}
 ```
 
 // ==========================================
 // FILE: src\Game\Layers\Gameplay.hpp
 // ==========================================
 ```cpp
-#pragma once
+﻿#pragma once
 #include <Engine/Engine.hpp>
 #include "GameGeneral.hpp"
 #include "LaneData.hpp"
@@ -4675,10 +4800,17 @@ private:
     std::vector<ElevatorCrowdEntity*> m_elevatorCrowds;
 
     std::string m_playerName = "HCMUS Student";
+    GameMode m_mode = GameMode::Campaign;
+
     int m_currentLevel = 1;
-    int m_maxLevel = 10;
+    int m_maxLevel = 5;
     int m_currentScore = 0;
-    int m_highestScore = 0;
+    float m_elapsedTime = 0.0f;
+    bool m_timerStarted = false; // Only true after player's first move
+
+    // Endless Mode Shrinking Death Border
+    float m_deathBorderY = 0.0f;
+    float m_deathBorderSpeed = 42.0f;
 
     float m_playerStartY = 700.0f;
     float m_goalY = 0.0f;
@@ -4687,10 +4819,19 @@ private:
     bool m_isGameOver = false;
     bool m_isLevelComplete = false;
 
+    TextureHandle m_texSafeZone{};
+    TextureHandle m_texRoad{};
+    TextureHandle m_texElevatorRoad{};
+    TextureHandle m_texCodeLine{};
+    TextureHandle m_texWater{};
+    glm::uvec2 m_waterAtlasDims{ 4, 1 };
+    float m_waterFrameDuration = 0.12f;
+
     void initLevel(int level, EngineContext* ctx);
     void generateLanesForLevel(int level);
     void spawnLaneEntities(EngineContext* ctx);
     void updateElevatorSignals(float dt);
+    void updateWaterAnimation(float dt);
 
 public:
     GameplayLayer() = default;
@@ -4704,7 +4845,6 @@ public:
 
     void triggerGameOver(EngineContext* ctx);
     void triggerLevelComplete(EngineContext* ctx);
-    void updateScore(int newScore, EngineContext* ctx);
 };
 ```
 
@@ -4954,6 +5094,9 @@ struct LaneData {
     // Elevator signal light state tracking
     float signalTimer = 0.0f;
     uint8_t signalPhase = 0; // 0 = Red, 1 = Yellow, 2 = Green
+
+    float waterAnimTimer = 0.0f;
+    uint8_t waterAnimFrame = 0;
 };
 ```
 
@@ -4964,6 +5107,7 @@ struct LaneData {
 #include "MainMenu.hpp"
 #include "SettingsLayer.hpp"
 #include "SaveLoadLayer.hpp"
+#include "ModeSelectLayer.hpp"
 #include "HUD.hpp"
 #include "Gameplay.hpp"
 
@@ -4977,11 +5121,10 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
     ctx->ui.TextBox(writeBuffer, ctx, ID_NAME_TextBox, { 450.0f, 320.0f, 300.0f, 50.0f }, m_playerName, m_cursorPos);
 
     // SWAP: NameInput -> Gameplay + HUD
-    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Confirm, { 450.0f, 400.0f, 300.0f, 50.0f }, "START GAMEPLAY")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Confirm, { 450.0f, 400.0f, 300.0f, 50.0f }, "CONFIRM NAME")) {
         ctx->blackboard.set("playerName", m_playerName);
-        ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
-        ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
-        ctx->layerStack->deferDetach(this); // SWAP OUT
+        ctx->layerStack->deferAttach(std::make_unique<ModeSelectLayer>());
+        ctx->layerStack->deferDetach(this);
     }
 
     // SWAP: NameInput -> MainMenu
@@ -5052,6 +5195,76 @@ public:
     void onDetach(EngineContext* ctx) override;
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
     void update(double dt, EngineContext* ctx) override;
+    void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
+};
+```
+
+// ==========================================
+// FILE: src\Game\Layers\ModeSelectLayer.cpp
+// ==========================================
+```cpp
+#include "ModeSelectLayer.hpp"
+#include "Gameplay.hpp"
+#include "HUD.hpp"
+#include "MainMenu.hpp"
+
+void ModeSelectLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
+    writeBuffer.push_command(100, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 0.06f, 0.08f, 0.11f, 1.0f },
+        .no_texture = true
+        });
+
+    TextPayload title;
+    title.color = { 1.0f, 0.85f, 0.2f, 1.0f };
+    title.scale = 32.0f;
+    title.position = { 600.0f, 220.0f };
+    title.showInCenter = true;
+    snprintf(title.text_content, sizeof(title.text_content), "SELECT GAME MODE");
+    writeBuffer.push_command(110, 0, title);
+
+    // CAMPAIGN MODE: 5-level progression
+    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Campaign, { 450.0f, 300.0f, 300.0f, 55.0f }, "CAMPAIGN (5 LEVELS)")) {
+        ctx->blackboard.set("gameMode", static_cast<int>(GameMode::Campaign));
+        ctx->blackboard.set("currentLevel", 1);
+        ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
+        ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
+        ctx->layerStack->deferDetach(this);
+        return;
+    }
+
+    // ENDLESS MODE: Infinite wave survival
+    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Endless, { 450.0f, 375.0f, 300.0f, 55.0f }, "ENDLESS SURVIVAL")) {
+        ctx->blackboard.set("gameMode", static_cast<int>(GameMode::Endless));
+        ctx->blackboard.set("currentLevel", 1);
+        ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
+        ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
+        ctx->layerStack->deferDetach(this);
+        return;
+    }
+
+    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Back, { 450.0f, 450.0f, 300.0f, 45.0f }, "BACK")) {
+        ctx->layerStack->deferAttach(std::make_unique<MainMenuLayer>());
+        ctx->layerStack->deferDetach(this);
+        return;
+    }
+}
+```
+
+// ==========================================
+// FILE: src\Game\Layers\ModeSelectLayer.hpp
+// ==========================================
+```cpp
+#pragma once
+#include <Engine/Engine.hpp>
+#include "GameGeneral.hpp"
+
+class ModeSelectLayer : public IEngineLayer {
+public:
+    void onAttach(EngineContext* ctx) override {}
+    void onDetach(EngineContext* ctx) override {}
+    void handleEvent(const EngineEvent& event, EngineContext* ctx) override {}
+    void update(double dt, EngineContext* ctx) override {}
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
 };
 ```

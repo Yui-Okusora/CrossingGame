@@ -12,5 +12,6 @@ public:
         const glm::vec4& bannerColor = { 0.9f, 0.75f, 0.1f, 0.85f },
         int32_t renderDepth = 20);
 
+    void onAttach(EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 };

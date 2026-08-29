@@ -5,8 +5,7 @@ GoalEntity::GoalEntity(const glm::vec2& pos,
     const glm::vec4& bannerColor,
     int32_t renderDepth)
     : m_color(bannerColor), m_renderDepth(renderDepth) {
-    position = pos;
-    prevPosition = pos;
+    position = prevPosition = pos;
     size = entitySize;
     layer = CollisionLayer::Layer_TriggerVolume;
     mask = CollisionLayer::Layer_Player;
@@ -14,11 +13,13 @@ GoalEntity::GoalEntity(const glm::vec2& pos,
     isStatic = true;
 }
 
+void GoalEntity::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+    TextureHandle goalTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/LevelUpLine.png");
+    animator.addAnimation("static", AnimationClip{ goalTex, { 1, 1 }, 0, 0, 1.0f, false });
+    animator.play("static");
+}
+
 void GoalEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x, renderPos.y, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    animator.draw(writeBuffer, ctx, renderPos, size, glm::vec4(1.0f), m_renderDepth, true);
 }

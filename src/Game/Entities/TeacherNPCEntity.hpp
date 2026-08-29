@@ -30,7 +30,7 @@ public:
 
     void setPlayer(StudentPlayerEntity* player) noexcept { m_player = player; } // <--- Setter
 
-    void onAttach(EngineContext* ctx);
+    void onAttach(EngineContext* ctx) override;
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;
     void onTrigger(const CollisionInfo& trigger, EngineContext* ctx) override;

@@ -1,21 +1,12 @@
 #include "TeacherNPCEntity.hpp"
 #include "StudentPlayerEntity.hpp"
 #include <iostream>
-#include <cmath>
 
 TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrolB, TeacherBuffType buff)
     : m_buffType(buff) {
-    position = pos;
-    prevPosition = pos;
-    m_patrolA = pos;
+    position = prevPosition = m_patrolA = pos;
     m_patrolB = patrolB;
     size = glm::vec2(44.0f, 44.0f);
-
-    switch (m_buffType) {
-    case TeacherBuffType::SpeedBoost:     m_color = glm::vec4{ 0.2f, 0.85f, 0.3f, 1.0f }; break;
-    case TeacherBuffType::DeadlineShield: m_color = glm::vec4{ 0.9f, 0.75f, 0.1f, 1.0f }; break;
-    case TeacherBuffType::GpaMultiplier:  m_color = glm::vec4{ 0.85f, 0.2f, 0.95f, 1.0f }; break;
-    }
 
     layer = CollisionLayer::Layer_TriggerVolume;
     mask = CollisionLayer::Layer_Player;
@@ -24,9 +15,17 @@ TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrol
 }
 
 void TeacherNPCEntity::onAttach(EngineContext* ctx) {
-    if (ctx) {
-        m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "buff_pickup.wav");
-    }
+    if (!ctx) return;
+    m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "hit.mp3");
+
+    // Alternate teacher sprite based on buff type
+    const char* sheetPath = (m_buffType == TeacherBuffType::GpaMultiplier)
+        ? RESOURCES_PATH "Sprite/Teacher/Teacher Tinh - animation.png"
+        : RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png";
+
+    TextureHandle teacherSheet = ctx->assetManager.loadTexture(sheetPath);
+    animator.addAnimation("patrol", AnimationClip{ teacherSheet, { 6, 4 }, 0, 5, 0.14f, true });
+    animator.play("patrol");
 }
 
 void TeacherNPCEntity::onUpdate(float dt, EngineContext* ctx) {
@@ -43,10 +42,8 @@ void TeacherNPCEntity::onUpdate(float dt, EngineContext* ctx) {
     else {
         velocity = glm::normalize(dir) * m_moveSpeed;
     }
-}
 
-void TeacherNPCEntity::onCollision(const CollisionInfo& collision, EngineContext* ctx) {
-    onTrigger(collision, ctx);
+    animator.flipX = (velocity.x < 0.0f);
 }
 
 void TeacherNPCEntity::onTrigger(const CollisionInfo& trigger, EngineContext* ctx) {
@@ -54,28 +51,18 @@ void TeacherNPCEntity::onTrigger(const CollisionInfo& trigger, EngineContext* ct
 
     if ((trigger.targetLayer & CollisionLayer::Layer_Player) != 0) {
         m_isBuffGiven = true;
-        active = false; // Disappear from arena upon pickup
+        active = false;
 
-        // --- FIX: Apply buff to player on collision ---
-        if (m_player) {
-            m_player->applyBuff(m_buffType);
-        }
-
-        if (ctx) {
-            ctx->audioEngine.play(m_buffSFX, AudioCategory::GameplaySFX);
-        }
-
-        std::cout << "[TeacherNPC] Granted Buff to Player: " << static_cast<int>(m_buffType) << "\n";
+        if (m_player) m_player->applyBuff(m_buffType);
+        if (ctx) ctx->audioEngine.play(m_buffSFX, AudioCategory::GameplaySFX);
     }
+}
+
+void TeacherNPCEntity::onCollision(const CollisionInfo& collision, EngineContext* ctx) {
+    onTrigger(collision, ctx);
 }
 
 void TeacherNPCEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
     if (m_isBuffGiven) return;
-
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x + 10.0f, renderPos.y + 10.0f, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    animator.draw(writeBuffer, ctx, { renderPos.x + 10.0f, renderPos.y + 10.0f }, size, glm::vec4(1.0f), m_renderDepth, true);
 }

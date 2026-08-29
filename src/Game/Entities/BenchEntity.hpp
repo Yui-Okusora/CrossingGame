@@ -16,5 +16,6 @@ public:
         const glm::vec4& color = { 0.55f, 0.55f, 0.58f, 1.0f },
         int32_t renderDepth = 30);
 
+    void onAttach(EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 };
