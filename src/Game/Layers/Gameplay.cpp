@@ -8,29 +8,50 @@
 #include "WinLoseLayer.hpp"
 #include "PauseMenu.hpp"
 #include <random>
-#include <cmath>
-#include <numeric>
+#include <chrono>
 #include <algorithm>
+#include <numeric>
+
+void GameplayLayer::updateScore(int newScore, EngineContext* ctx) {
+    m_currentScore = newScore;
+    ctx->blackboard.set("currentScore", m_currentScore);
+
+    if (m_currentScore > m_highestScore) {
+        m_highestScore = m_currentScore;
+        ctx->blackboard.set("highestScore", m_highestScore);
+    }
+}
 
 void GameplayLayer::onAttach(EngineContext* ctx) {
     if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) m_playerName = *nameOpt;
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
     if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
+    // Retrieve persistent high score from blackboard
+    if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) {
+        m_highestScore = *highScoreOpt;
+    }
+    else {
+        m_highestScore = 0;
+        ctx->blackboard.set("highestScore", m_highestScore);
+    }
+
+    m_maxLevel = MAX_CAMPAIGN_LEVELS;
     m_currentScore = 0;
     m_elapsedTime = 0.0f;
     m_timerStarted = false;
+
     ctx->blackboard.set("currentScore", m_currentScore);
     ctx->blackboard.set("elapsedTime", m_elapsedTime);
+    ctx->blackboard.set("currentLevel", m_currentLevel);
+    ctx->blackboard.set("maxLevel", m_maxLevel);
 
-    // Preload all textures into cache
     m_texSafeZone = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
     m_texRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Road/Road.png");
     m_texElevatorRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/ElevatorRoad.png");
     m_texCodeLine = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine.png");
     m_texWater = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/River/River.png");
     m_texBusSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
-    m_texBusLong = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/LongBus.png");
     m_texExamPaper = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/ExamPaper/ExamPaper.png");
 
     m_codeObstacleTextures = {
@@ -61,7 +82,6 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
     m_timerStarted = false;
     m_totalLanesSpawned = 0;
 
-    // 1. Offset starting coordinate to bottom edge (805 - 64 = 741)
     m_playerStartY = 741.0f;
     m_deathBorderY = 805.0f;
     m_topGeneratedY = m_playerStartY;
@@ -69,7 +89,6 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
     m_player = m_scene.spawn<StudentPlayerEntity>(ctx, glm::vec2(576.0f, m_playerStartY), this);
 
     if (m_mode == GameMode::Endless) {
-        // Initial infinite seed: Generate 25 procedural lanes upward
         generateEndlessChunk(25, ctx);
     }
     else {
@@ -80,16 +99,15 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
         }
     }
 
-    if (m_player) {
-        // 2. Lock camera to Y = 0 at start so no space below Y = 805 is visible
-        ctx->cameraPos = glm::vec2(0.0f, 0.0f);
-        m_cameraTargetY = 0.0f;
-    }
+    ctx->cameraPos = glm::vec2(0.0f, 0.0f);
+    m_cameraTargetY = 0.0f;
 }
 
 void GameplayLayer::generateEndlessChunk(int count, EngineContext* ctx) {
-    std::mt19937 rng(1337 + m_totalLanesSpawned * 37);
-    std::uniform_real_distribution<float> speedDist(120.0f, 210.0f);
+    static uint64_t sessionTimeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(static_cast<uint32_t>(sessionTimeSeed + m_totalLanesSpawned * 7919));
+
+    std::uniform_real_distribution<float> speedDist(130.0f, 220.0f);
     std::uniform_real_distribution<float> offsetDist(0.0f, 320.0f);
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
@@ -100,7 +118,7 @@ void GameplayLayer::generateEndlessChunk(int count, EngineContext* ctx) {
         float currentY = m_topGeneratedY - (m_totalLanesSpawned == 0 ? 0.0f : 64.0f);
         m_topGeneratedY = currentY;
 
-        LaneType type = (m_totalLanesSpawned == 0 || m_totalLanesSpawned % 5 == 0)
+        LaneType type = (m_totalLanesSpawned == 0 || m_totalLanesSpawned % 6 == 0)
             ? LaneType::SafeZone
             : hazardPool[hazardTypeDist(rng)];
 
@@ -128,7 +146,7 @@ void GameplayLayer::generateLanesForLevel(int level) {
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
 
-    int totalLanes = 10 + (level * 3);
+    int totalLanes = 10 + (level * 2);
     float startY = 741.0f;
     float laneHeight = 64.0f;
 
@@ -157,12 +175,12 @@ void GameplayLayer::generateLanesForLevel(int level) {
         for (int c = 0; c < clusterSize && currentLaneIdx < totalLanes - 1; ++c) {
             float currentY = startY - (currentLaneIdx * laneHeight);
             float speed = speedDist(rng);
-
             int dir = dirDist(rng) ? 1 : -1;
-            if (dir == lastDirection) {
-                if (++sameDirStreak >= 2) { dir = -dir; sameDirStreak = 1; }
+
+            if (dir == lastDirection && ++sameDirStreak >= 2) {
+                dir = -dir; sameDirStreak = 1;
             }
-            else {
+            else if (dir != lastDirection) {
                 sameDirStreak = 1;
             }
             lastDirection = dir;
@@ -185,32 +203,30 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
         return;
     }
 
-    if (lane.type == LaneType::SafeZone && lane.yPosition < 700.0f) {
-        std::uniform_int_distribution<int> benchCountDist(1, 3);
-        int benchCount = benchCountDist(laneRng);
-
-        std::vector<int> validTileCols(16);
-        std::iota(validTileCols.begin(), validTileCols.end(), 1);
-        std::shuffle(validTileCols.begin(), validTileCols.end(), laneRng);
+    if (lane.type == LaneType::SafeZone && lane.yPosition < 741.0f) {
+        int benchCount = std::uniform_int_distribution<int>(1, 3)(laneRng);
+        std::vector<int> validCols(16);
+        std::iota(validCols.begin(), validCols.end(), 1);
+        std::shuffle(validCols.begin(), validCols.end(), laneRng);
 
         for (int b = 0; b < benchCount; ++b) {
-            m_scene.spawn<BenchEntity>(ctx, glm::vec2(validTileCols[b] * 64.0f, lane.yPosition));
+            m_scene.spawn<BenchEntity>(ctx, glm::vec2(validCols[b] * 64.0f, lane.yPosition));
         }
 
-        std::uniform_int_distribution<int> buffTypeDist(0, 2);
+        auto buffType = static_cast<TeacherBuffType>(std::uniform_int_distribution<int>(0, 2)(laneRng));
         auto* teacher = m_scene.spawn<TeacherNPCEntity>(
             ctx,
-            glm::vec2(validTileCols[benchCount] * 64.0f, lane.yPosition),
-            glm::vec2(validTileCols[benchCount + 1] * 64.0f, lane.yPosition),
-            static_cast<TeacherBuffType>(buffTypeDist(laneRng))
+            glm::vec2(validCols[benchCount] * 64.0f, lane.yPosition),
+            glm::vec2(validCols[benchCount + 1] * 64.0f, lane.yPosition),
+            buffType
         );
         teacher->setPlayer(m_player);
     }
     else if (lane.type == LaneType::Asphalt) {
-        int busCount = std::uniform_int_distribution<int>(1, 2)(laneRng);
-        float sector = 1100.0f / busCount;
+        int count = std::uniform_int_distribution<int>(1, 2)(laneRng);
+        float sector = 1100.0f / count;
 
-        for (int b = 0; b < busCount; ++b) {
+        for (int b = 0; b < count; ++b) {
             float x = std::fmod((b * sector) + lane.spawnXOffset, 1100.0f);
             auto* bus = m_scene.spawn<MovingHazardEntity>(
                 ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
@@ -232,13 +248,13 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
         for (int c = 0; c < count; ++c) {
             float x = std::fmod((c * sector) + lane.spawnXOffset, 1100.0f);
             TextureHandle codeTex = m_codeObstacleTextures[c % m_codeObstacleTextures.size()];
-            auto* codeStream = m_scene.spawn<MovingHazardEntity>(
+            auto* stream = m_scene.spawn<MovingHazardEntity>(
                 ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
                 glm::vec2(110.0f, 40.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
                 false, 12.0f, glm::vec4(1.0f), 40
             );
-            codeStream->animator.addAnimation("stream", AnimationClip{ codeTex, { 1, 1 }, 0, 0, 1.0f, false });
-            codeStream->animator.play("stream");
+            stream->animator.addAnimation("stream", AnimationClip{ codeTex, { 1, 1 }, 0, 0, 1.0f, false });
+            stream->animator.play("stream");
         }
     }
     else if (lane.type == LaneType::Water) {
@@ -259,15 +275,15 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
 }
 
 void GameplayLayer::updateWaterAnimation(float dt) {
-    int totalFrames = static_cast<int>(m_waterAtlasDims.x * m_waterAtlasDims.y);
-    if (totalFrames <= 0) return;
+    int total = static_cast<int>(m_waterAtlasDims.x * m_waterAtlasDims.y);
+    if (total <= 0) return;
 
     for (auto& lane : m_lanes) {
         if (lane.type != LaneType::Water) continue;
         lane.waterAnimTimer += dt;
         if (lane.waterAnimTimer >= m_waterFrameDuration) {
             lane.waterAnimTimer -= m_waterFrameDuration;
-            lane.waterAnimFrame = static_cast<uint8_t>((lane.waterAnimFrame + 1) % totalFrames);
+            lane.waterAnimFrame = static_cast<uint8_t>((lane.waterAnimFrame + 1) % total);
         }
     }
 }
@@ -313,10 +329,8 @@ void GameplayLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
 
 void GameplayLayer::update(double dt, EngineContext* ctx) {
     if (m_isGameOver || m_isLevelComplete) return;
-
     float fDt = static_cast<float>(dt);
 
-    // Timer begins exclusively after player initiates their first move
     if (!m_timerStarted && m_player && m_player->hasStartedFirstMove()) {
         m_timerStarted = true;
     }
@@ -325,17 +339,14 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
         m_elapsedTime += fDt;
         ctx->blackboard.set("elapsedTime", m_elapsedTime);
 
-        // Endless Mode: Upward creeping death border
         if (m_mode == GameMode::Endless) {
-            float speed = m_deathBorderSpeed + (m_currentLevel * 3.0f);
-            m_deathBorderY -= speed * fDt;
+            m_deathBorderY -= m_deathBorderSpeed * fDt;
 
             if (m_player && m_player->position.y >= m_deathBorderY) {
                 triggerGameOver(ctx);
                 return;
             }
 
-            // Generate infinite lanes ahead as player progresses[cite: 9, 10]
             if (m_player && m_player->position.y < m_topGeneratedY + 800.0f) {
                 generateEndlessChunk(15, ctx);
             }
@@ -343,8 +354,7 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
             int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
             int timeScore = static_cast<int>(m_elapsedTime * 15.0f);
             int multiplier = m_player ? m_player->getScoreMultiplier() : 1;
-            m_currentScore = (timeScore + distanceScore) * multiplier;
-            ctx->blackboard.set("currentScore", m_currentScore);
+            updateScore((timeScore + distanceScore) * multiplier, ctx);
         }
     }
 
@@ -371,7 +381,6 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
     if (m_player) {
         m_player->postPhysicsUpdate(fDt, ctx);
 
-        // Campaign Mode win condition at Goal Line[cite: 9, 10]
         if (m_mode == GameMode::Campaign && m_player->position.y <= m_goalY + 20.0f) {
             triggerLevelComplete(ctx);
             return;
@@ -384,9 +393,8 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
         if (m_mode == GameMode::Campaign && m_timerStarted) {
             int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
             int multiplier = m_player->getScoreMultiplier();
-            if (distanceScore > m_currentScore) {
-                m_currentScore = distanceScore * multiplier;
-                ctx->blackboard.set("currentScore", m_currentScore);
+            if (distanceScore * multiplier > m_currentScore) {
+                updateScore(distanceScore * multiplier, ctx);
             }
         }
     }
@@ -430,7 +438,6 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         }
     }
 
-    // Render Endless Mode Red Danger Fog & Creeping Death Border[cite: 9, 10]
     if (m_mode == GameMode::Endless) {
         writeBuffer.push_command(80, 0, RectPayload{
             .dest_rect = { 0.0f, m_deathBorderY, 1200.0f, 800.0f },
@@ -438,7 +445,6 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
             .no_texture = true,
             .is_world_space = true
             });
-
         writeBuffer.push_command(85, 0, RectPayload{
             .dest_rect = { 0.0f, m_deathBorderY - 4.0f, 1200.0f, 8.0f },
             .color = { 1.0f, 0.2f, 0.2f, 0.95f },
@@ -453,6 +459,7 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
 void GameplayLayer::triggerGameOver(EngineContext* ctx) {
     if (m_isGameOver) return;
     m_isGameOver = true;
+    updateScore(m_currentScore, ctx);
     ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(false));
 }
 
@@ -461,8 +468,7 @@ void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
 
     if (m_currentLevel < m_maxLevel) {
         int timeBonus = (std::max)(0, static_cast<int>(1000.0f - (m_elapsedTime * 20.0f)));
-        m_currentScore += timeBonus;
-        ctx->blackboard.set("currentScore", m_currentScore);
+        updateScore(m_currentScore + timeBonus, ctx);
 
         m_currentLevel++;
         ctx->blackboard.set("currentLevel", m_currentLevel);
@@ -470,6 +476,7 @@ void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     }
     else {
         m_isLevelComplete = true;
+        updateScore(m_currentScore, ctx);
         ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
     }
 }

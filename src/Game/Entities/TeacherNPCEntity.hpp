@@ -1,17 +1,12 @@
 #pragma once
 #include <Engine/Engine.hpp>
+#include "StatusEffect.hpp"
 
-class StudentPlayerEntity; // Forward declaration
-
-enum class TeacherBuffType : uint8_t {
-    SpeedBoost,
-    DeadlineShield,
-    GpaMultiplier
-};
+class StudentPlayerEntity;
 
 class TeacherNPCEntity : public Entity2D {
 private:
-    StudentPlayerEntity* m_player = nullptr; // <--- Add player pointer
+    StudentPlayerEntity* m_player = nullptr;
     TeacherBuffType m_buffType = TeacherBuffType::SpeedBoost;
     glm::vec2 m_patrolA{ 0.0f, 0.0f };
     glm::vec2 m_patrolB{ 0.0f, 0.0f };
@@ -28,7 +23,7 @@ public:
         const glm::vec2& patrolB,
         TeacherBuffType buff = TeacherBuffType::SpeedBoost);
 
-    void setPlayer(StudentPlayerEntity* player) noexcept { m_player = player; } // <--- Setter
+    void setPlayer(StudentPlayerEntity* player) noexcept { m_player = player; }
 
     void onAttach(EngineContext* ctx) override;
     void onUpdate(float dt, EngineContext* ctx) override;

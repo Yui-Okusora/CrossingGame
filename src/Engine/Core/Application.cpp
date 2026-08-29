@@ -89,7 +89,19 @@ void Application::run() {
 
         RenderData& renderData = m_ctx.renderBuffer.getReadBuffer();
 
-        m_gl2dRenderer.clearScreen({ 0.0f, 0.0f, 0.0f, 1.0f }); // Clear frame baseline color
+        // 1. Clear complete screen window with black letterbox color
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // 2. Confine all canvas rendering commands to the 1200x805 scaled viewport
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(
+            static_cast<GLint>(m_ctx.currentViewport.offset.x),
+            static_cast<GLint>(m_ctx.currentViewport.offset.y),
+            static_cast<GLsizei>(scaledCanvas.x),
+            static_cast<GLsizei>(scaledCanvas.y)
+        );
 
         std::sort(renderData.commands.begin(), renderData.commands.end(),
             [](const RenderCommand& a, const RenderCommand& b) noexcept {

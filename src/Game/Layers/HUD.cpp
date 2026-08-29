@@ -13,6 +13,7 @@ void HUDLayer::update(double dt, EngineContext* ctx) {
     if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) m_currentScore = *scoreOpt;
     if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) m_highestScore = *highScoreOpt;
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
+    if (auto maxLvlOpt = ctx->blackboard.get<int>("maxLevel")) m_maxLevel = *maxLvlOpt;
     if (auto timeOpt = ctx->blackboard.get<float>("elapsedTime")) m_elapsedTime = *timeOpt;
     if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
@@ -33,14 +34,15 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
     // ========================================================================
     // 1. TOP TELEMETRY RIBBON
     // ========================================================================
+    float ribbonWidth = (m_mode == GameMode::Endless) ? 1200.0f : 940.0f;
     writeBuffer.push_command(500, 0, RectPayload{
-        .dest_rect = { 0.0f, 0.0f, 1200.0f, 54.0f },
+        .dest_rect = { 0.0f, 0.0f, ribbonWidth, 54.0f },
         .color = { 0.06f, 0.08f, 0.10f, 0.95f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // Score & High Score
+    // Score & High Score Text
     TextPayload scoreText{
         .position = { 20.0f, 34.0f },
         .color = { 1.0f, 0.9f, 0.2f, 1.0f },
@@ -50,170 +52,145 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
     std::snprintf(scoreText.text_content, sizeof(scoreText.text_content), "SCORE: %d (HIGH: %d)", m_currentScore, m_highestScore);
     writeBuffer.push_command(510, 0, scoreText);
 
-    // Mode / Wave Phase Indicator
-    TextPayload levelText{
-        .position = { 460.0f, 34.0f },
-        .color = { 0.3f, 0.85f, 1.0f, 1.0f },
-        .scale = 22.0f,
-        .showInCenter = true
-    };
+    // Endless Mode Telemetry
     if (m_mode == GameMode::Endless) {
-        std::snprintf(levelText.text_content, sizeof(levelText.text_content), "ENDLESS (WAVE %d)", m_currentLevel);
+        TextPayload levelText{
+            .position = { 600.0f, 34.0f },
+            .color = { 0.3f, 0.85f, 1.0f, 1.0f },
+            .scale = 22.0f,
+            .showInCenter = true
+        };
+        std::snprintf(levelText.text_content, sizeof(levelText.text_content), "ENDLESS MODE");
+        writeBuffer.push_command(510, 0, levelText);
+
+        TextPayload timeText{
+            .position = { 1100.0f, 34.0f },
+            .color = { 0.2f, 1.0f, 0.4f, 1.0f },
+            .scale = 22.0f,
+            .showInCenter = true
+        };
+        std::snprintf(timeText.text_content, sizeof(timeText.text_content), "TIME: %02d:%04.1f", minutes, seconds);
+        writeBuffer.push_command(510, 0, timeText);
     }
-    else {
-        std::snprintf(levelText.text_content, sizeof(levelText.text_content), "LEVEL %d / 5", m_currentLevel);
+
+    // ========================================================================
+    // 2. STUDENT ID CARD (Campaign Mode Only)
+    // ========================================================================
+    if (m_mode == GameMode::Campaign) {
+        float idX = 960.0f, idY = 4.0f, idW = 220.0f, idH = 116.0f;
+
+        writeBuffer.push_command(515, 0, RectPayload{
+            .dest_rect = { idX, idY, idW, idH },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = idCardTex,
+            .no_texture = false,
+            .is_world_space = false
+            });
+
+        uint32_t meterFrame = std::clamp<uint32_t>(
+            static_cast<uint32_t>((m_currentLevel * 10) / (std::max)(1, m_maxLevel)),
+            0, 10
+        );
+
+        writeBuffer.push_command(520, 0, RectPayload{
+            .dest_rect = { idX + 128.0f, idY + 50.0f, 76.0f, 18.0f },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = pointMeter,
+            .atlas_dimensions = { 11, 1 },
+            .atlas_pos = { meterFrame, 0 },
+            .no_texture = false,
+            .is_world_space = false
+            });
+
+        TextPayload expTimeText{
+            .position = { idX + 144.0f, idY + 86.0f },
+            .color = { 0.08f, 0.10f, 0.14f, 1.0f },
+            .scale = 14.0f,
+            .showInCenter = false
+        };
+        std::snprintf(expTimeText.text_content, sizeof(expTimeText.text_content), "%02d:%04.1f", minutes, seconds);
+        writeBuffer.push_command(530, 0, expTimeText);
     }
-    writeBuffer.push_command(510, 0, levelText);
-
-    // Time Counter
-    TextPayload timeText{
-        .position = { 700.0f, 34.0f },
-        .color = { 0.2f, 1.0f, 0.4f, 1.0f },
-        .scale = 22.0f,
-        .showInCenter = true
-    };
-    std::snprintf(timeText.text_content, sizeof(timeText.text_content), "TIME: %02d:%04.1f", minutes, seconds);
-    writeBuffer.push_command(510, 0, timeText);
 
     // ========================================================================
-    // 2. STUDENT ID CARD (NewUI.png + PointMeter.png UV Fix)
+    // 3. VERTICAL DROPDOWN STATUS BUFF BADGES
     // ========================================================================
-    float idX = 960.0f;
-    float idY = 4.0f;
-    float idW = 220.0f;
-    float idH = 116.0f;
+    float badgeX = 20.0f;
+    float currentBadgeY = 64.0f;
+    float badgeH = 30.0f;
+    float badgeGap = 8.0f;
 
-    // Base ID Badge
-    writeBuffer.push_command(520, 0, RectPayload{
-        .dest_rect = { idX, idY, idW, idH },
-        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-        .texture = idCardTex,
-        .no_texture = false,
-        .is_world_space = false
-        });
+    auto renderBadge = [&](glm::vec4 boxColor, glm::vec4 borderColor, glm::vec4 iconColor, const char* textStr) {
+        float boxW = 140.0f;
+        float boxX = badgeX + 32.0f;
+        float centerX = boxX + (boxW * 0.5f);
+        float centerY = currentBadgeY + (badgeH * 0.5f) + 5.0f;
 
-    // PointMeter: 7-Column Spritesheet { 7, 1 }
-    uint32_t meterFrame = std::clamp<uint32_t>(static_cast<uint32_t>(m_currentScore / 250), 0, 6);
-    writeBuffer.push_command(525, 0, RectPayload{
-        .dest_rect = { idX + 128.0f, idY + 50.0f, 64.0f, 16.0f },
-        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-        .texture = pointMeter,
-        .atlas_dimensions = { 11, 1 },
-        .atlas_pos = { meterFrame, 0 },
-        .no_texture = false,
-        .is_world_space = false
-        });
+        // 1. Background Box (Depth: 520)
+        writeBuffer.push_command(520, 0, RectPayload{
+            .dest_rect = { boxX, currentBadgeY, boxW, badgeH },
+            .color = boxColor,
+            .no_texture = true,
+            .is_world_space = false
+            });
 
-    // Expired Timer string positioned on top of the underscore line
-    TextPayload expTimeText{
-        .position = { idX + 144.0f, idY + 86.0f },
-        .color = { 0.08f, 0.10f, 0.14f, 1.0f },
-        .scale = 14.0f,
-        .showInCenter = false
-    };
-    std::snprintf(expTimeText.text_content, sizeof(expTimeText.text_content), "%02d:%04.1f", minutes, seconds);
-    writeBuffer.push_command(530, 0, expTimeText);
+        // 2. Box Border Outlines (Depth: 525)
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY}, {boxX + boxW, currentBadgeY}, borderColor, 1.5f });
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY}, {boxX, currentBadgeY + badgeH}, borderColor, 1.5f });
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX + boxW, currentBadgeY}, {boxX + boxW, currentBadgeY + badgeH}, borderColor, 1.5f });
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY + badgeH}, {boxX + boxW, currentBadgeY + badgeH}, borderColor, 1.5f });
 
-    // ========================================================================
-    // 3. ACTIVE BUFF STATUS BADGES
-    // ========================================================================
-    float badgeX = 20.0f, badgeY = 62.0f, badgeHeight = 28.0f, badgeGap = 8.0f;
+        // 3. Buff Icon Badge (Depth: 530)
+        writeBuffer.push_command(530, 0, RectPayload{
+            .dest_rect = { badgeX, currentBadgeY, 30.0f, 30.0f },
+            .color = iconColor,
+            .texture = buffIconTex,
+            .no_texture = false,
+            .is_world_space = false
+            });
+
+        // 4. Drop Shadow Text for Readability (Depth: 545)
+        TextPayload shadowTxt{
+            .position = { centerX + 1.0f, centerY + 1.0f },
+            .color = { 0.05f, 0.05f, 0.05f, 0.9f },
+            .scale = 15.0f,
+            .showInCenter = true
+        };
+        std::snprintf(shadowTxt.text_content, sizeof(shadowTxt.text_content), "%s", textStr);
+        writeBuffer.push_command(545, 0, shadowTxt);
+
+        // 5. Crisp Foreground Text (Depth: 550)
+        TextPayload frontTxt{
+            .position = { centerX, centerY },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .scale = 15.0f,
+            .showInCenter = true
+        };
+        std::snprintf(frontTxt.text_content, sizeof(frontTxt.text_content), "%s", textStr);
+        writeBuffer.push_command(550, 0, frontTxt);
+
+        // Step downward vertically for the next active buff
+        currentBadgeY += badgeH + badgeGap;
+        };
 
     if (m_buffInvincibleTimer > 0.0f) {
-        writeBuffer.push_command(540, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, 28.0f, 28.0f },
-            .color = { 0.2f, 0.9f, 1.0f, 1.0f },
-            .texture = buffIconTex,
-            .no_texture = false,
-            .is_world_space = false
-            });
-        writeBuffer.push_command(545, 0, RectPayload{
-            .dest_rect = { badgeX + 32.0f, badgeY, 130.0f, badgeHeight },
-            .color = { 0.1f, 0.75f, 0.9f, 0.9f },
-            .no_texture = true,
-            .is_world_space = false
-            });
-        TextPayload txt{
-            .position = { badgeX + 97.0f, badgeY + 19.0f },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .scale = 14.0f,
-            .showInCenter = true
-        };
-        std::snprintf(txt.text_content, sizeof(txt.text_content), "INVINCIBLE: %.1fs", m_buffInvincibleTimer);
-        writeBuffer.push_command(550, 0, txt);
-        badgeX += 170.0f + badgeGap;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "INVINCIBLE: %.1fs", m_buffInvincibleTimer);
+        renderBadge({ 0.08f, 0.50f, 0.70f, 0.95f }, { 0.3f, 0.85f, 1.0f, 1.0f }, { 0.2f, 0.9f, 1.0f, 1.0f }, buf);
     }
     else if (m_buffShieldActive) {
-        writeBuffer.push_command(540, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, 28.0f, 28.0f },
-            .color = { 1.0f, 0.85f, 0.1f, 1.0f },
-            .texture = buffIconTex,
-            .no_texture = false,
-            .is_world_space = false
-            });
-        writeBuffer.push_command(545, 0, RectPayload{
-            .dest_rect = { badgeX + 32.0f, badgeY, 120.0f, badgeHeight },
-            .color = { 0.8f, 0.65f, 0.1f, 0.9f },
-            .no_texture = true,
-            .is_world_space = false
-            });
-        TextPayload txt{
-            .position = { badgeX + 92.0f, badgeY + 19.0f },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .scale = 14.0f,
-            .showInCenter = true
-        };
-        std::snprintf(txt.text_content, sizeof(txt.text_content), "[SHIELD: READY]");
-        writeBuffer.push_command(550, 0, txt);
-        badgeX += 160.0f + badgeGap;
+        renderBadge({ 0.70f, 0.55f, 0.08f, 0.95f }, { 1.0f, 0.85f, 0.2f, 1.0f }, { 1.0f, 0.85f, 0.1f, 1.0f }, "[SHIELD: READY]");
     }
 
     if (m_buffSpeedTimer > 0.0f) {
-        writeBuffer.push_command(540, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, 28.0f, 28.0f },
-            .color = { 0.2f, 0.85f, 0.3f, 1.0f },
-            .texture = buffIconTex,
-            .no_texture = false,
-            .is_world_space = false
-            });
-        writeBuffer.push_command(545, 0, RectPayload{
-            .dest_rect = { badgeX + 32.0f, badgeY, 115.0f, badgeHeight },
-            .color = { 0.15f, 0.7f, 0.25f, 0.9f },
-            .no_texture = true,
-            .is_world_space = false
-            });
-        TextPayload txt{
-            .position = { badgeX + 89.0f, badgeY + 19.0f },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .scale = 14.0f,
-            .showInCenter = true
-        };
-        std::snprintf(txt.text_content, sizeof(txt.text_content), "SPEED: %.1fs", m_buffSpeedTimer);
-        writeBuffer.push_command(550, 0, txt);
-        badgeX += 155.0f + badgeGap;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "SPEED: %.1fs", m_buffSpeedTimer);
+        renderBadge({ 0.12f, 0.55f, 0.22f, 0.95f }, { 0.3f, 0.95f, 0.4f, 1.0f }, { 0.2f, 0.85f, 0.3f, 1.0f }, buf);
     }
 
     if (m_buffGpaTimer > 0.0f) {
-        writeBuffer.push_command(540, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, 28.0f, 28.0f },
-            .color = { 0.85f, 0.2f, 0.95f, 1.0f },
-            .texture = buffIconTex,
-            .no_texture = false,
-            .is_world_space = false
-            });
-        writeBuffer.push_command(545, 0, RectPayload{
-            .dest_rect = { badgeX + 32.0f, badgeY, 115.0f, badgeHeight },
-            .color = { 0.65f, 0.15f, 0.75f, 0.9f },
-            .no_texture = true,
-            .is_world_space = false
-            });
-        TextPayload txt{
-            .position = { badgeX + 89.0f, badgeY + 19.0f },
-            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-            .scale = 14.0f,
-            .showInCenter = true
-        };
-        std::snprintf(txt.text_content, sizeof(txt.text_content), "GPA 2X: %.1fs", m_buffGpaTimer);
-        writeBuffer.push_command(550, 0, txt);
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "GPA 2X: %.1fs", m_buffGpaTimer);
+        renderBadge({ 0.55f, 0.15f, 0.65f, 0.95f }, { 0.9f, 0.35f, 1.0f, 1.0f }, { 0.85f, 0.2f, 0.95f, 1.0f }, buf);
     }
 }

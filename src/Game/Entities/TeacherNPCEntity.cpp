@@ -16,9 +16,8 @@ TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrol
 
 void TeacherNPCEntity::onAttach(EngineContext* ctx) {
     if (!ctx) return;
-    m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "hit.mp3");
+    m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "buff_pickup.wav");
 
-    // Alternate teacher sprite based on buff type
     const char* sheetPath = (m_buffType == TeacherBuffType::GpaMultiplier)
         ? RESOURCES_PATH "Sprite/Teacher/Teacher Tinh - animation.png"
         : RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png";

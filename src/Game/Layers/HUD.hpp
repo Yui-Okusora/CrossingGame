@@ -8,6 +8,7 @@ private:
     std::string m_playerName = "HCMUS Student";
     GameMode m_mode = GameMode::Campaign;
     int m_currentLevel = 1;
+    int m_maxLevel = MAX_CAMPAIGN_LEVELS; // Declared and defaulted to centralized MAX_CAMPAIGN_LEVELS
     int m_currentScore = 0;
     int m_highestScore = 0;
     float m_elapsedTime = 0.0f;

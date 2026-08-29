@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 
+inline constexpr int MAX_CAMPAIGN_LEVELS = 10;
+
 enum class GameMode : uint8_t {
     Campaign,
     Endless

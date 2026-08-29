@@ -19,8 +19,9 @@ private:
     GameMode m_mode = GameMode::Campaign;
 
     int m_currentLevel = 1;
-    int m_maxLevel = 5;
+    int m_maxLevel = MAX_CAMPAIGN_LEVELS;
     int m_currentScore = 0;
+    int m_highestScore = 0; // High score tracker preserved across restarts
     float m_elapsedTime = 0.0f;
     bool m_timerStarted = false;
 
@@ -30,7 +31,7 @@ private:
     float m_deathBorderY = 764.0f;
     float m_deathBorderSpeed = 44.0f;
 
-    float m_playerStartY = 700.0f;
+    float m_playerStartY = 741.0f;
     float m_goalY = 0.0f;
     float m_cameraTargetY = 0.0f;
 
@@ -44,7 +45,6 @@ private:
     TextureHandle m_texCodeLine{};
     TextureHandle m_texWater{};
     TextureHandle m_texBusSheet{};
-    TextureHandle m_texBusLong{};
     TextureHandle m_texExamPaper{};
     std::vector<TextureHandle> m_codeObstacleTextures;
 
@@ -57,6 +57,7 @@ private:
     void spawnSingleLaneEntities(const LaneData& lane, EngineContext* ctx, bool isGoal = false);
     void updateElevatorSignals(float dt);
     void updateWaterAnimation(float dt);
+    void updateScore(int newScore, EngineContext* ctx);
 
 public:
     GameplayLayer() = default;

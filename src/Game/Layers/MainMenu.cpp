@@ -91,24 +91,24 @@ void MainMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         .is_world_space = false
         });
 
-    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Start, { 470.0f, 380.0f, 260.0f, 65.0f }, playBtn, { 2, 1 })) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Start, { 470.0f, 380.0f, 192.0f, 72.0f }, playBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<NameInputLayer>());
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Continue, { 470.0f, 455.0f, 260.0f, 65.0f }, continueBtn, { 2, 1 })) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Continue, { 470.0f, 455.0f, 192.0f, 72.0f }, continueBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<LoadMenuLayer>());
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Settings, { 470.0f, 530.0f, 260.0f, 65.0f }, optionBtn, { 2, 1 })) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Settings, { 470.0f, 530.0f, 192.0f, 72.0f }, optionBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<SettingsMenuLayer>());
         return;
     }
 
-    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Exit, { 470.0f, 605.0f, 260.0f, 65.0f }, exitBtn, { 2, 1 })) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Exit, { 470.0f, 605.0f, 192.0f, 72.0f }, exitBtn, { 2, 1 })) {
         ctx->isRunning.store(false, std::memory_order_relaxed);
     }
 }

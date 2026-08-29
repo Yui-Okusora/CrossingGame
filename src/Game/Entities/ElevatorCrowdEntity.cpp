@@ -1,5 +1,4 @@
 #include "ElevatorCrowdEntity.hpp"
-#include <algorithm>
 
 ElevatorCrowdEntity::ElevatorCrowdEntity(const glm::vec2& pos, float speed, int dir,
     const glm::vec2& entitySize, float surgeMultiplier, float worldWidth,
@@ -53,12 +52,13 @@ void ElevatorCrowdEntity::onUpdate(float dt, EngineContext* ctx) {
 void ElevatorCrowdEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
     if (m_state != CrowdState::Rushing) return;
 
-    float renderLeft = renderPos.x;
-    float renderRight = renderPos.x + size.x;
-    float clipLeft = std::clamp(renderLeft, 0.0f, m_worldWidth);
-    float clipRight = std::clamp(renderRight, 0.0f, m_worldWidth);
-
-    if (clipRight > clipLeft) {
-        animator.draw(writeBuffer, ctx, { clipLeft, renderPos.y + m_visualYOffset }, { clipRight - clipLeft, size.y }, glm::vec4(1.0f), m_renderDepth, true);
-    }
+    // Render full un-compressed sprite quad; OpenGL Scissor handles screen boundaries seamlessly
+    animator.draw(
+        writeBuffer, ctx,
+        { renderPos.x, renderPos.y + m_visualYOffset },
+        size,
+        glm::vec4(1.0f),
+        m_renderDepth,
+        true
+    );
 }

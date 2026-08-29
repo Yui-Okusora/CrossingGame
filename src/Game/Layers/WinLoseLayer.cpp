@@ -9,6 +9,12 @@ void WinLosePopupLayer::onAttach(EngineContext* ctx) {
     if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) m_finalScore = *scoreOpt;
     if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) m_highestScore = *highScoreOpt;
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
+
+    // Update and persist high score if broken
+    if (m_finalScore > m_highestScore) {
+        m_highestScore = m_finalScore;
+        ctx->blackboard.set("highestScore", m_highestScore);
+    }
 }
 
 void WinLosePopupLayer::onDetach(EngineContext* ctx) {}
@@ -17,6 +23,11 @@ void WinLosePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
         if (ev.action == GLFW_PRESS && ev.key == GLFW_KEY_Y) {
+            ctx->blackboard.set("currentLevel", 1);
+            ctx->blackboard.set("currentScore", 0);
+            ctx->blackboard.set("elapsedTime", 0.0f);
+            // highestScore remains untouched in blackboard
+
             ctx->layerStack->deferClear();
             ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
             ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
@@ -27,7 +38,6 @@ void WinLosePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx
 void WinLosePopupLayer::update(double dt, EngineContext* ctx) {}
 
 void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Semi-transparent backdrop dimming
     writeBuffer.push_command(800, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.78f },
@@ -35,7 +45,6 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .is_world_space = false
         });
 
-    // 2. Dark Slate Modal Box
     glm::vec4 panelBounds{ 380.0f, 180.0f, 440.0f, 440.0f };
     writeBuffer.push_command(810, 0, RectPayload{
         .dest_rect = panelBounds,
@@ -44,14 +53,12 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .is_world_space = false
         });
 
-    // Border Outlines
     glm::vec4 borderCol = m_isVictory ? glm::vec4{ 0.2f, 0.85f, 0.4f, 1.0f } : glm::vec4{ 0.85f, 0.25f, 0.25f, 1.0f };
     writeBuffer.push_command(815, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y}, borderCol, 2.0f });
     writeBuffer.push_command(815, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
     writeBuffer.push_command(815, 0, LinePayload{ {panelBounds.x + panelBounds.z, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
     writeBuffer.push_command(815, 0, LinePayload{ {panelBounds.x, panelBounds.y + panelBounds.w}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
 
-    // 3. Victory/Defeat Banner Title
     TextPayload titleText{
         .position = { panelBounds.x + (panelBounds.z * 0.5f), panelBounds.y + 40.0f },
         .color = m_isVictory ? glm::vec4{ 0.2f, 0.95f, 0.35f, 1.0f } : glm::vec4{ 0.95f, 0.25f, 0.25f, 1.0f },
@@ -61,7 +68,6 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
     std::snprintf(titleText.text_content, sizeof(titleText.text_content), m_isVictory ? "LEVEL CLEARED!" : "GAME OVER");
     writeBuffer.push_command(820, 0, titleText);
 
-    // 4. Academic Degree Badge
     if (m_isVictory) {
         const char* badgePath = (m_finalScore > 2000) ? RESOURCES_PATH "Sprite/Result screen/PhDBadge.png"
             : (m_finalScore > 1000) ? RESOURCES_PATH "Sprite/Result screen/MasterBadge.png"
@@ -76,7 +82,6 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
             });
     }
 
-    // 5. Match Statistics
     float statsY = m_isVictory ? panelBounds.y + 160.0f : panelBounds.y + 90.0f;
     TextPayload statsText{
         .position = { panelBounds.x + (panelBounds.z * 0.5f), statsY },
@@ -89,7 +94,6 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         m_playerName.c_str(), m_finalScore, m_highestScore);
     writeBuffer.push_command(830, 0, statsText);
 
-    // 6. Action Buttons
     float btnX = panelBounds.x + 40.0f;
     float btnW = panelBounds.z - 80.0f;
     float startY = panelBounds.y + 285.0f;
