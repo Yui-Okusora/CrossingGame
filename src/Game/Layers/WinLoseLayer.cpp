@@ -10,10 +10,17 @@ void WinLosePopupLayer::onAttach(EngineContext* ctx) {
     if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) m_highestScore = *highScoreOpt;
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
     if (auto timeOpt = ctx->blackboard.get<float>("elapsedTime")) m_elapsedTime = *timeOpt;
+    if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
     if (m_finalScore > m_highestScore) {
         m_highestScore = m_finalScore;
         ctx->blackboard.set("highestScore", m_highestScore);
+    }
+
+    if (ctx) {
+        const char* resultSfxPath = m_isVictory ? SFX_PATH "game_win.wav" : SFX_PATH "game_over.wav";
+        AudioHandle resultSFX = ctx->audioEngine.loadSound(resultSfxPath);
+        ctx->audioEngine.play(resultSFX, AudioCategory::GameplaySFX);
     }
 }
 
@@ -37,6 +44,7 @@ void WinLosePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx
 void WinLosePopupLayer::update(double dt, EngineContext* ctx) {}
 
 void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
+    // 1. Semi-transparent Backdrop Dimming (Depth: 800)
     writeBuffer.push_command(800, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.78f },
@@ -44,6 +52,7 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .is_world_space = false
         });
 
+    // 2. Modal Slate Panel (Depth: 810)
     writeBuffer.push_command(810, 0, RectPayload{
         .dest_rect = m_panelBounds,
         .color = { 0.12f, 0.15f, 0.20f, 0.98f },
@@ -51,13 +60,14 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .is_world_space = false
         });
 
+    // Modal Border Lines (Depth: 815)
     glm::vec4 borderCol = m_isVictory ? glm::vec4{ 0.2f, 0.85f, 0.4f, 1.0f } : glm::vec4{ 0.85f, 0.25f, 0.25f, 1.0f };
     writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, borderCol, 2.0f });
     writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
     writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
     writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
 
-    // 1. Title Banner
+    // 3. Header Title Banner (Depth: 820)
     TextPayload titleText{
         .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 36.0f },
         .color = m_isVictory ? glm::vec4{ 0.2f, 0.95f, 0.35f, 1.0f } : glm::vec4{ 0.95f, 0.25f, 0.25f, 1.0f },
@@ -67,34 +77,30 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
     std::snprintf(titleText.text_content, sizeof(titleText.text_content), m_isVictory ? "CONGRATULATIONS!" : "GAME OVER");
     writeBuffer.push_command(820, 0, titleText);
 
-    // 2. Degree Title & Badge Logo
-    const char* degreeTitle = (m_finalScore > 2500) ? "DOCTOR OF PHILOSOPHY (PH.D)"
-        : (m_finalScore > 1200) ? "MASTER OF SCIENCE"
-        : "BACHELOR OF SCIENCE";
+    // 4. Resolve Academic Badge & Degree Title
+    AcademicBadgeInfo badgeInfo = GetAcademicBadgeInfo(m_mode, m_currentLevel, m_finalScore);
+    TextureHandle badgeTex = ctx->assetManager.loadTexture(badgeInfo.badgePath);
 
-    const char* badgePath = (m_finalScore > 2500) ? RESOURCES_PATH "Sprite/Result screen/PhDBadge.png"
-        : (m_finalScore > 1200) ? RESOURCES_PATH "Sprite/Result screen/MasterBadge.png"
-        : RESOURCES_PATH "Sprite/Result screen/BachelorBadge.png";
-
-    TextureHandle badgeTex = ctx->assetManager.loadTexture(badgePath);
-    writeBuffer.push_command(825, 0, RectPayload{
-        .dest_rect = { m_panelBounds.x + (m_panelBounds.z * 0.5f) - 34.0f, m_panelBounds.y + 60.0f, 68.0f, 68.0f },
-        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
-        .texture = badgeTex,
-        .no_texture = false,
-        .is_world_space = false
-        });
+    if (badgeTex.id != 0) {
+        writeBuffer.push_command(825, 0, RectPayload{
+            .dest_rect = { m_panelBounds.x + (m_panelBounds.z * 0.5f) - 34.0f, m_panelBounds.y + 60.0f, 68.0f, 68.0f },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = badgeTex,
+            .no_texture = false,
+            .is_world_space = false
+            });
+    }
 
     TextPayload degreeText{
         .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 145.0f },
-        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .color = badgeInfo.color,
         .scale = 16.0f,
         .showInCenter = true
     };
-    std::snprintf(degreeText.text_content, sizeof(degreeText.text_content), "TITLE: %s", degreeTitle);
+    std::snprintf(degreeText.text_content, sizeof(degreeText.text_content), "TITLE: %s", badgeInfo.title);
     writeBuffer.push_command(830, 0, degreeText);
 
-    // 3. Stats Block (Student, Score, Time)
+    // 5. Performance Stats Block (Depth: 835)
     int minutes = static_cast<int>(m_elapsedTime) / 60;
     float seconds = std::fmod(m_elapsedTime, 60.0f);
 
@@ -105,11 +111,12 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .showInCenter = true
     };
     std::snprintf(statsText.text_content, sizeof(statsText.text_content),
-        "STUDENT: %s\nFINAL SCORE: %d | HIGH SCORE: %d\nTIME SURVIVED: %02d:%04.1f\n\nPRESS 'Y' TO RESTART",
-        m_playerName.c_str(), m_finalScore, m_highestScore, minutes, seconds);
+        "STUDENT: %s\nFINAL SCORE: %d | HIGH SCORE: %d\nTIME: %02d:%04.1f (%s)\n\nPRESS 'Y' TO RESTART",
+        m_playerName.c_str(), m_finalScore, m_highestScore, minutes, seconds,
+        (m_mode == GameMode::Endless ? "ENDLESS" : "CAMPAIGN"));
     writeBuffer.push_command(835, 0, statsText);
 
-    // 4. Action Buttons
+    // 6. Action Buttons (Depth: 900)
     float btnX = m_panelBounds.x + 40.0f;
     float btnW = m_panelBounds.z - 80.0f;
     float startY = m_panelBounds.y + 345.0f;

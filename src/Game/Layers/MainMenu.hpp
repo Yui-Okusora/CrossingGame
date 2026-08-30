@@ -16,8 +16,11 @@ public:
 };
 
 class MainMenuLayer : public IEngineLayer {
+private:
+    AudioHandle m_bgmMusic{ 0 };
+
 public:
-    void onAttach(EngineContext* ctx) override {}
+    void onAttach(EngineContext* ctx) override;
     void onDetach(EngineContext* ctx) override {}
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override {}
     void update(double dt, EngineContext* ctx) override {}

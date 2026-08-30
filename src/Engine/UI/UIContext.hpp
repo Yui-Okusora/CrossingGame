@@ -3,6 +3,7 @@
 #include <string>
 #include <glm/glm.hpp>
 #include "../Graphics/RenderStream.hpp"
+#include "../System/AudioEngine.hpp"
 
 class EngineContext;
 struct RenderData;
@@ -15,6 +16,9 @@ struct UIState {
 };
 
 class UIContext {
+private:
+    AudioHandle m_clickSFX{ 0 };
+
 public:
     uint32_t hot_id = 0;
     uint32_t active_id = 0;
@@ -34,7 +38,6 @@ public:
     bool TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         const glm::vec4& bounds, TextureHandle texture, glm::uvec2 atlasDims, const char* label = nullptr, float textScale = 20.0f);
 
-    // Clean plain-color slider with responsive track groove, fill, and interactive thumb
     bool Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         const glm::vec4& trackBounds, float& value);
 

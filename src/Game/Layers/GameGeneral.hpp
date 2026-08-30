@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <glm/glm.hpp>
 
 inline constexpr int MAX_CAMPAIGN_LEVELS = 10;
 
@@ -41,5 +42,48 @@ enum UIWidgetID : uint32_t {
     ID_POP_MainMenu,
 
     ID_SAVE_Slot_Base = 7000,
-    ID_SAVE_Back = 7020
+    ID_SAVE_Back = 7020,
+
+    ID_DEADLINE_Dismiss = 8001
 };
+
+struct AcademicBadgeInfo {
+    const char* title;
+    const char* badgePath;
+    glm::vec4 color;
+};
+
+inline AcademicBadgeInfo GetAcademicBadgeInfo(GameMode mode, int level, int score) {
+    if (mode == GameMode::Campaign) {
+        if (level >= 10 && score >= 7000) {
+            // Gold Shield
+            return { "DOCTOR OF PHILOSOPHY (PH.D)", RESOURCES_PATH "Sprite/Result screen/PhDBadge.png", { 1.0f, 0.85f, 0.2f, 1.0f } };
+        }
+        if (level >= 7 || score >= 4500) {
+            // Blue Shield
+            return { "MASTER OF SCIENCE", RESOURCES_PATH "Sprite/Result screen/MasterBadge.png", { 0.3f, 0.85f, 1.0f, 1.0f } };
+        }
+        if (level >= 4 || score >= 2000) {
+            // Silver Shield
+            return { "BACHELOR OF SCIENCE", RESOURCES_PATH "Sprite/Result screen/BachelorBadge.png", { 0.85f, 0.90f, 0.95f, 1.0f } };
+        }
+        // Bronze Shield
+        return { "UNDERGRADUATE STUDENT", RESOURCES_PATH "Sprite/Result screen/StudentBadge.png", { 0.95f, 0.60f, 0.35f, 1.0f } };
+    }
+    else {
+        if (score >= 6500) {
+            // Gold Shield
+            return { "DOCTOR OF PHILOSOPHY (PH.D)", RESOURCES_PATH "Sprite/Result screen/PhDBadge.png", { 1.0f, 0.85f, 0.2f, 1.0f } };
+        }
+        if (score >= 3500) {
+            // Blue Shield
+            return { "MASTER OF SCIENCE", RESOURCES_PATH "Sprite/Result screen/MasterBadge.png", { 0.3f, 0.85f, 1.0f, 1.0f } };
+        }
+        if (score >= 1500) {
+            // Silver Shield
+            return { "BACHELOR OF SCIENCE", RESOURCES_PATH "Sprite/Result screen/BachelorBadge.png", { 0.85f, 0.90f, 0.95f, 1.0f } };
+        }
+        // Bronze Shield
+        return { "UNDERGRADUATE STUDENT", RESOURCES_PATH "Sprite/Result screen/StudentBadge.png", { 0.95f, 0.60f, 0.35f, 1.0f } };
+    }
+}

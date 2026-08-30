@@ -1,4 +1,5 @@
 ﻿#include "Gameplay.hpp"
+#include "DeadlinePopupLayer.hpp"
 #include "../Entities/GoalEntity.hpp"
 #include "../Entities/BenchEntity.hpp"
 #include "../Entities/MovingHazardEntity.hpp"
@@ -22,30 +23,53 @@ void GameplayLayer::updateScore(int newScore, EngineContext* ctx) {
     }
 }
 
+void GameplayLayer::updateDeadlinePopupTrigger(float dt, EngineContext* ctx) {
+    if (!m_timerStarted || m_isGameOver || m_isLevelComplete) return;
+
+    m_deadlineTimer += dt;
+    if (m_deadlineTimer >= m_nextDeadlineInterval) {
+        m_deadlineTimer = 0.0f;
+
+        static std::mt19937 popupRng(static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::uniform_real_distribution<float> intervalDist(18.0f, 35.0f);
+        m_nextDeadlineInterval = intervalDist(popupRng);
+
+        ctx->layerStack->deferAttach(std::make_unique<DeadlinePopupLayer>());
+    }
+}
+
 void GameplayLayer::onAttach(EngineContext* ctx) {
     if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) m_playerName = *nameOpt;
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
     if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
+    if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) m_currentScore = *scoreOpt;
+    else m_currentScore = 0;
+
+    if (auto timeOpt = ctx->blackboard.get<float>("elapsedTime")) m_elapsedTime = *timeOpt;
+    else m_elapsedTime = 0.0f;
+
     if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) {
         m_highestScore = *highScoreOpt;
     }
     else {
-        m_highestScore = 0;
+        m_highestScore = m_currentScore;
         ctx->blackboard.set("highestScore", m_highestScore);
     }
 
     m_maxLevel = MAX_CAMPAIGN_LEVELS;
-    m_currentScore = 0;
-    m_elapsedTime = 0.0f;
-    m_timerStarted = false;
+    m_timerStarted = (m_elapsedTime > 0.0f);
+    m_deadlineTimer = 0.0f;
+    m_nextDeadlineInterval = 22.0f;
+    m_endSequenceTimer = 0.0f;
+    m_popupTriggered = false;
 
     ctx->blackboard.set("currentScore", m_currentScore);
     ctx->blackboard.set("elapsedTime", m_elapsedTime);
     ctx->blackboard.set("currentLevel", m_currentLevel);
     ctx->blackboard.set("maxLevel", m_maxLevel);
+    ctx->blackboard.set("gameMode", static_cast<int>(m_mode));
 
-    // Terrain Textures
     m_texGrassStart = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassStart.png");
     m_texGrassSafePath = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
     m_texGrassEnd = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassEnd.png");
@@ -57,7 +81,6 @@ void GameplayLayer::onAttach(EngineContext* ctx) {
     m_texBusSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
     m_texExamPaper = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/ExamPaper/ExamPaper.png");
 
-    // 2-State Elevator Doors
     m_texElevatorClosed = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-closed.png");
     m_texElevatorOpened = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-opened.png");
 
@@ -70,10 +93,19 @@ void GameplayLayer::onAttach(EngineContext* ctx) {
         ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-Missing_.png")
     };
 
+    m_bgmMusic = ctx->audioEngine.loadSound(SFX_PATH "gameplay_bgm.wav", true);
+    m_elevatorChimeSFX = ctx->audioEngine.loadSound(SFX_PATH "elevator_chime.wav");
+    m_levelCompleteSFX = ctx->audioEngine.loadSound(SFX_PATH "level_complete.wav");
+
+    ctx->audioEngine.play(m_bgmMusic, AudioCategory::Music, true);
+
     initLevel(m_currentLevel, ctx);
 }
 
 void GameplayLayer::onDetach(EngineContext* ctx) {
+    if (ctx && m_bgmMusic.id != 0) {
+        ctx->audioEngine.stop(m_bgmMusic);
+    }
     m_scene.clear();
     m_lanes.clear();
     m_elevatorCrowds.clear();
@@ -86,12 +118,17 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
     m_elevatorCrowds.clear();
     m_isGameOver = false;
     m_isLevelComplete = false;
-    m_timerStarted = false;
+    m_popupTriggered = false;
+    m_endSequenceTimer = 0.0f;
+    m_timerStarted = (m_elapsedTime > 0.0f);
     m_totalLanesSpawned = 0;
 
     m_playerStartY = 741.0f;
     m_deathBorderY = 805.0f;
     m_topGeneratedY = m_playerStartY;
+
+    uint64_t freshSeed = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    m_endlessRng.seed(static_cast<uint32_t>(freshSeed ^ (freshSeed >> 32)));
 
     m_player = m_scene.spawn<StudentPlayerEntity>(ctx, glm::vec2(576.0f, m_playerStartY), this);
 
@@ -111,9 +148,6 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
 }
 
 void GameplayLayer::generateEndlessChunk(int count, EngineContext* ctx) {
-    static uint64_t sessionTimeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    std::mt19937 rng(static_cast<uint32_t>(sessionTimeSeed + m_totalLanesSpawned * 7919));
-
     std::uniform_real_distribution<float> speedDist(130.0f, 220.0f);
     std::uniform_real_distribution<float> offsetDist(0.0f, 320.0f);
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
@@ -125,18 +159,18 @@ void GameplayLayer::generateEndlessChunk(int count, EngineContext* ctx) {
         float currentY = m_topGeneratedY - (m_totalLanesSpawned == 0 ? 0.0f : 64.0f);
         m_topGeneratedY = currentY;
 
-        LaneType type = (m_totalLanesSpawned == 0 || m_totalLanesSpawned % 6 == 0)
+        LaneType type = (m_totalLanesSpawned < 2 || m_totalLanesSpawned % 6 == 0)
             ? LaneType::SafeZone
-            : hazardPool[hazardTypeDist(rng)];
+            : hazardPool[hazardTypeDist(m_endlessRng)];
 
         LaneData lane{
             .yPosition = currentY,
             .height = 64.0f,
             .type = type,
-            .moveSpeed = (type == LaneType::SafeZone) ? 0.0f : speedDist(rng),
-            .direction = dirDist(rng) ? 1 : -1,
-            .spawnXOffset = offsetDist(rng),
-            .seed = static_cast<uint32_t>(rng())
+            .moveSpeed = (type == LaneType::SafeZone) ? 0.0f : speedDist(m_endlessRng),
+            .direction = dirDist(m_endlessRng) ? 1 : -1,
+            .spawnXOffset = offsetDist(m_endlessRng),
+            .seed = static_cast<uint32_t>(m_endlessRng())
         };
 
         m_lanes.push_back(lane);
@@ -159,7 +193,6 @@ void GameplayLayer::generateLanesForLevel(int level) {
 
     m_lanes.clear();
 
-    // Two starting grass lanes
     m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
     m_lanes.push_back({ startY - laneHeight, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
 
@@ -260,7 +293,7 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
             TextureHandle codeTex = m_codeObstacleTextures[c % m_codeObstacleTextures.size()];
             auto* stream = m_scene.spawn<MovingHazardEntity>(
                 ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
-                glm::vec2(110.0f, 40.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
+                glm::vec2(100.0f, 35.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
                 false, 12.0f, glm::vec4(1.0f), 40
             );
             stream->animator.addAnimation("stream", AnimationClip{ codeTex, { 1, 1 }, 0, 0, 1.0f, false });
@@ -275,7 +308,7 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
             float x = std::fmod((l * sector) + lane.spawnXOffset, 1050.0f);
             auto* platform = m_scene.spawn<MovingHazardEntity>(
                 ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
-                glm::vec2(160.0f, 46.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
+                glm::vec2(96.0f, 48.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
                 true, 8.0f, glm::vec4(1.0f), 25
             );
             platform->animator.addAnimation("float", AnimationClip{ m_texExamPaper, { 1, 1 }, 0, 0, 1.0f, false });
@@ -298,23 +331,27 @@ void GameplayLayer::updateWaterAnimation(float dt) {
     }
 }
 
-void GameplayLayer::updateElevatorSignals(float dt) {
+void GameplayLayer::updateElevatorSignals(float dt, EngineContext* ctx) {
     size_t crowdIdx = 0;
     for (auto& lane : m_lanes) {
         if (lane.type != LaneType::ElevatorTile) continue;
 
         lane.signalTimer += dt;
         if (lane.signalPhase == 0 && lane.signalTimer >= 3.0f) {
-            lane.signalPhase = 1; lane.signalTimer = 0.0f; // Red -> Yellow (Door opens)
+            lane.signalPhase = 1;
+            lane.signalTimer = 0.0f;
+            if (ctx) ctx->audioEngine.play(m_elevatorChimeSFX, AudioCategory::GameplaySFX);
         }
         else if (lane.signalPhase == 1 && lane.signalTimer >= 1.2f) {
-            lane.signalPhase = 2; lane.signalTimer = 0.0f; // Yellow -> Green (Crowd rushes)
+            lane.signalPhase = 2;
+            lane.signalTimer = 0.0f;
         }
         else if (lane.signalPhase == 2) {
             bool finished = (crowdIdx < m_elevatorCrowds.size() && m_elevatorCrowds[crowdIdx])
                 ? m_elevatorCrowds[crowdIdx]->hasFinishedCrossing() : true;
             if (finished) {
-                lane.signalPhase = 0; lane.signalTimer = 0.0f; // Crowd finished -> Door closes (Red)
+                lane.signalPhase = 0;
+                lane.signalTimer = 0.0f;
             }
         }
 
@@ -338,8 +375,28 @@ void GameplayLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
 }
 
 void GameplayLayer::update(double dt, EngineContext* ctx) {
-    if (m_isGameOver || m_isLevelComplete) return;
     float fDt = static_cast<float>(dt);
+
+    // Allow lose / win animation sequence to play out smoothly before attaching the result overlay
+    if (m_isGameOver) {
+        m_scene.fixedUpdate(dt, ctx);
+        m_endSequenceTimer += fDt;
+        if (m_endSequenceTimer >= 0.85f && !m_popupTriggered) {
+            m_popupTriggered = true;
+            ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(false));
+        }
+        return;
+    }
+
+    if (m_isLevelComplete && m_currentLevel == m_maxLevel) {
+        m_scene.fixedUpdate(dt, ctx);
+        m_endSequenceTimer += fDt;
+        if (m_endSequenceTimer >= 1.0f && !m_popupTriggered) {
+            m_popupTriggered = true;
+            ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
+        }
+        return;
+    }
 
     if (!m_timerStarted && m_player && m_player->hasStartedFirstMove()) {
         m_timerStarted = true;
@@ -349,11 +406,13 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
         m_elapsedTime += fDt;
         ctx->blackboard.set("elapsedTime", m_elapsedTime);
 
+        updateDeadlinePopupTrigger(fDt, ctx);
+
         if (m_mode == GameMode::Endless) {
             m_deathBorderY -= m_deathBorderSpeed * fDt;
 
             if (m_player && m_player->position.y >= m_deathBorderY) {
-                triggerGameOver(ctx);
+                m_player->handleLethalDamage(ctx);
                 return;
             }
 
@@ -364,11 +423,14 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
             int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
             int timeScore = static_cast<int>(m_elapsedTime * 15.0f);
             int multiplier = m_player ? m_player->getScoreMultiplier() : 1;
-            updateScore((timeScore + distanceScore) * multiplier, ctx);
+            int candidateScore = (timeScore + distanceScore) * multiplier;
+            if (candidateScore > m_currentScore) {
+                updateScore(candidateScore, ctx);
+            }
         }
     }
 
-    updateElevatorSignals(fDt);
+    updateElevatorSignals(fDt, ctx);
     updateWaterAnimation(fDt);
 
     if (m_player) {
@@ -459,11 +521,9 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
             .is_world_space = true
             });
 
-        // 2-State Elevator Door Entrances: Phase 0 is closed; Phase 1 (Yellow light) and Phase 2 (Green) are opened
         if (lane.type == LaneType::ElevatorTile) {
             TextureHandle doorTex = (lane.signalPhase == 0) ? m_texElevatorClosed : m_texElevatorOpened;
 
-            // Left Elevator Entrance
             writeBuffer.push_command(15, 0, RectPayload{
                 .dest_rect = { 0.0f, lane.yPosition, 64.0f, 64.0f },
                 .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -472,7 +532,6 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
                 .is_world_space = true
                 });
 
-            // Right Elevator Entrance
             writeBuffer.push_command(15, 0, RectPayload{
                 .dest_rect = { 1136.0f, lane.yPosition, 64.0f, 64.0f },
                 .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -505,14 +564,16 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
 void GameplayLayer::triggerGameOver(EngineContext* ctx) {
     if (m_isGameOver) return;
     m_isGameOver = true;
+    m_endSequenceTimer = 0.0f;
+    m_popupTriggered = false;
     updateScore(m_currentScore, ctx);
-    ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(false));
 }
 
 void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     if (m_isLevelComplete) return;
 
     if (m_currentLevel < m_maxLevel) {
+        if (ctx) ctx->audioEngine.play(m_levelCompleteSFX, AudioCategory::GameplaySFX);
         int timeBonus = (std::max)(0, static_cast<int>(1000.0f - (m_elapsedTime * 20.0f)));
         updateScore(m_currentScore + timeBonus, ctx);
 
@@ -522,7 +583,10 @@ void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     }
     else {
         m_isLevelComplete = true;
+        m_endSequenceTimer = 0.0f;
+        m_popupTriggered = false;
+        if (m_player) m_player->playWinAnimation();
+        if (ctx) ctx->audioEngine.play(m_levelCompleteSFX, AudioCategory::GameplaySFX);
         updateScore(m_currentScore, ctx);
-        ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
     }
 }

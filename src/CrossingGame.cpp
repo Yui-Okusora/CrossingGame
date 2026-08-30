@@ -90,6 +90,7 @@ int main() {
         TextureHandle texSaveGameBox = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/SaveGame/savegame box.png");
 
         // --- RESULT SCREEN ---
+        TextureHandle texStudentBadge = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/StudentBadge.png");
         TextureHandle texBachelorBadge = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/BachelorBadge.png");
         TextureHandle texLoseScreen = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/LoseScreen.png");
         TextureHandle texMasterBadge = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Result screen/MasterBadge.png");
@@ -99,6 +100,8 @@ int main() {
         // --- TEACHERS ---
         TextureHandle texTeacherQuan = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png");
         TextureHandle texTeacherTinh = ctx.assetManager.loadTexture(RESOURCES_PATH "Sprite/Teacher/Teacher Tinh - animation.png");
+
+
 
         ctx.layerStack->pushLayer(std::make_unique<MainMenuLayer>(), &ctx);
         app.run();

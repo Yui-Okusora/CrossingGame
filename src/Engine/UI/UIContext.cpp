@@ -62,7 +62,13 @@ bool UIContext::Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         writeBuffer.push_command(910, 0, txt);
     }
 
-    if (state.clicked) clicked_id = 0;
+    if (state.clicked) {
+        if (m_clickSFX.id == 0) {
+            m_clickSFX = ctx->audioEngine.loadSound(SFX_PATH "button_click.wav");
+        }
+        ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX);
+        clicked_id = 0;
+    }
     return state.clicked;
 }
 
@@ -102,13 +108,18 @@ bool UIContext::TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint
         writeBuffer.push_command(910, 0, txt);
     }
 
-    if (state.clicked) clicked_id = 0;
+    if (state.clicked) {
+        if (m_clickSFX.id == 0) {
+            m_clickSFX = ctx->audioEngine.loadSound(SFX_PATH "button_click.wav");
+        }
+        ctx->audioEngine.play(m_clickSFX, AudioCategory::InteractSFX);
+        clicked_id = 0;
+    }
     return state.clicked;
 }
 
 bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& value) {
     if (input_enabled) {
-        // Expand interactive hitbox vertically for effortless mouse tracking
         glm::vec4 hitBounds{ trackBounds.x, trackBounds.y - 8.0f, trackBounds.z, trackBounds.w + 16.0f };
         ctx->collisionWorld.register_collider(id, hitBounds, Layer_UI);
     }
@@ -125,7 +136,6 @@ bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         value = std::clamp(relativeX / trackBounds.z, 0.0f, 1.0f);
     }
 
-    // 1. Background Groove
     writeBuffer.push_command(900, 0, RectPayload{
         .dest_rect = trackBounds,
         .color = { 0.05f, 0.06f, 0.08f, 1.0f },
@@ -133,17 +143,15 @@ bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         .is_world_space = false
         });
 
-    // 2. Active Fill Bar
     if (value > 0.005f) {
         writeBuffer.push_command(905, 0, RectPayload{
             .dest_rect = { trackBounds.x, trackBounds.y, trackBounds.z * value, trackBounds.w },
-            .color = { 0.95f, 0.65f, 0.15f, 1.0f }, // Gold/Orange accent
+            .color = { 0.95f, 0.65f, 0.15f, 1.0f },
             .no_texture = true,
             .is_world_space = false
             });
     }
 
-    // 3. Thumb / Knob Indicator
     float knobWidth = 14.0f;
     float knobHeight = trackBounds.w + 12.0f;
     float knobX = trackBounds.x + (trackBounds.z * value) - (knobWidth * 0.5f);

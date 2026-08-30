@@ -54,6 +54,7 @@ add_executable (CrossingGame
   "src/Game/Layers/SettingsLayer.cpp" 
   "src/Game/Layers/WinLoseLayer.cpp"  
   "src/Game/Layers/ModeSelectLayer.cpp"  
+  "src/Game/Layers/DeadlinePopupLayer.cpp"  
   "src/Game/Data/GameStateData.cpp" 
   "src/Game/Entities/GoalEntity.cpp" 
   "src/Game/Entities/BenchEntity.cpp" 

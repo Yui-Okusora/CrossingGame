@@ -46,9 +46,12 @@ void RectPayload::Execute(gl2d::Renderer2D& renderer, const void* payload, Engin
         renderer.renderRectangle(scaledRect, data.color, scaledOrigin, data.rotation);
     }
     else {
+        if (data.texture.id == 0) return; // Prevent binding invalid textures
+
         gl2d::Texture tex = ctx->assetManager.getTexture(data.texture);
+        if (tex.id == 0) return;
+
         if (data.use_custom_uv) {
-            // Directly pass custom UV glm::vec4 to gl2d::Renderer2D::renderRectangle
             renderer.renderRectangle(scaledRect, tex, data.color, scaledOrigin, data.rotation, data.custom_uv);
         }
         else {

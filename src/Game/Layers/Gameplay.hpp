@@ -4,6 +4,7 @@
 #include "LaneData.hpp"
 #include <vector>
 #include <string>
+#include <random>
 
 class StudentPlayerEntity;
 class ElevatorCrowdEntity;
@@ -25,7 +26,16 @@ private:
     float m_elapsedTime = 0.0f;
     bool m_timerStarted = false;
 
+    // Transition & Animation Delay Trackers
+    float m_endSequenceTimer = 0.0f;
+    bool m_popupTriggered = false;
+
+    // Deadline Random Popup Tracker
+    float m_deadlineTimer = 0.0f;
+    float m_nextDeadlineInterval = 20.0f;
+
     // Endless Infinite Generation Trackers
+    std::mt19937 m_endlessRng;
     float m_topGeneratedY = 700.0f;
     int m_totalLanesSpawned = 0;
     float m_deathBorderY = 764.0f;
@@ -50,9 +60,14 @@ private:
     TextureHandle m_texBusSheet{};
     TextureHandle m_texExamPaper{};
 
-    // Elevator Door Sprites (2 States)
+    // Elevator Doors
     TextureHandle m_texElevatorClosed{};
     TextureHandle m_texElevatorOpened{};
+
+    // Gameplay Audio Handles
+    AudioHandle m_bgmMusic{ 0 };
+    AudioHandle m_elevatorChimeSFX{ 0 };
+    AudioHandle m_levelCompleteSFX{ 0 };
 
     std::vector<TextureHandle> m_codeObstacleTextures;
 
@@ -63,9 +78,10 @@ private:
     void generateLanesForLevel(int level);
     void generateEndlessChunk(int count, EngineContext* ctx);
     void spawnSingleLaneEntities(const LaneData& lane, EngineContext* ctx, bool isGoal = false);
-    void updateElevatorSignals(float dt);
+    void updateElevatorSignals(float dt, EngineContext* ctx);
     void updateWaterAnimation(float dt);
     void updateScore(int newScore, EngineContext* ctx);
+    void updateDeadlinePopupTrigger(float dt, EngineContext* ctx);
 
 public:
     GameplayLayer() = default;

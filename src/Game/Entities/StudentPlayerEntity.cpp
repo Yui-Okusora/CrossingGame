@@ -26,23 +26,37 @@ StudentPlayerEntity::StudentPlayerEntity(const glm::vec2& startPos, GameplayLaye
 void StudentPlayerEntity::onAttach(EngineContext* ctx) {
     if (!ctx) return;
     TextureHandle catSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Cat character rework - animation.png");
+    TextureHandle winSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/winAnimation.png");
+    TextureHandle loseSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/loseAnimation.png");
+    TextureHandle fallWaterSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Fallwater.png");
+    TextureHandle auraSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/auraBuff.png");
 
-    // Row 0: Down Movement (Frames 0 - 5)
-    animator.addAnimation("hop_down", AnimationClip{ catSheet, { 6, 4 }, 0, 5, 0.05f, true });
-
-    // Row 1: Up Movement (Frames 6 - 11)
-    animator.addAnimation("hop_up", AnimationClip{ catSheet, { 6, 4 }, 6, 11, 0.05f, true });
-
-    // Row 2: Side Movement (Frames 12 - 17, flipX handles Left)
+    // Directional Movement & Idle (4 rows of 64x64 cat spritesheet)
+    animator.addAnimation("hop_down", AnimationClip{ catSheet, { 6, 4 }, 0,  5,  0.05f, true });
+    animator.addAnimation("hop_up", AnimationClip{ catSheet, { 6, 4 }, 6,  11, 0.05f, true });
     animator.addAnimation("hop_side", AnimationClip{ catSheet, { 6, 4 }, 12, 17, 0.05f, true });
-
-    // Row 3: Universal Idle (Frames 18 - 21)
     animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 18, 21, 0.28f, true });
+
+    // Outcome Animations (Updated Fallwater to 9 columns, frames 0 to 8)
+    animator.addAnimation("win", AnimationClip{ winSheet,       { 9, 1 }, 0, 8, 0.09f, true });
+    animator.addAnimation("lose", AnimationClip{ loseSheet,      { 9, 1 }, 0, 8, 0.09f, false });
+    animator.addAnimation("fall_water", AnimationClip{ fallWaterSheet, { 9, 1 }, 0, 8, 0.09f, false });
+
+    // 4-Frame Looping Flame Aura Sprite
+    m_auraAnimator.addAnimation("aura_loop", AnimationClip{ auraSheet, { 4, 1 }, 0, 3, 0.08f, true });
+    m_auraAnimator.play("aura_loop");
+
+    // Audio SFX
+    m_hopSFX = ctx->audioEngine.loadSound(SFX_PATH "player_hop.wav");
+    m_deathSFX = ctx->audioEngine.loadSound(SFX_PATH "player_death.wav");
+    m_waterSplashSFX = ctx->audioEngine.loadSound(SFX_PATH "water_splash.wav");
+    m_shieldBreakSFX = ctx->audioEngine.loadSound(SFX_PATH "shield_break.wav");
 
     playIdleAnimation();
 }
 
 void StudentPlayerEntity::playHopAnimation() {
+    if (m_isDead || m_isWon) return;
     switch (m_facing) {
     case PlayerDirection::Down:
         animator.flipX = false;
@@ -64,8 +78,28 @@ void StudentPlayerEntity::playHopAnimation() {
 }
 
 void StudentPlayerEntity::playIdleAnimation() {
+    if (m_isDead || m_isWon) return;
     animator.flipX = false;
     animator.play("idle");
+}
+
+void StudentPlayerEntity::playWinAnimation() {
+    m_isWon = true;
+    m_isMoving = false;
+    animator.flipX = false;
+    animator.play("win", true);
+}
+
+void StudentPlayerEntity::playDeathAnimation(bool isWater) {
+    m_isDead = true;
+    m_isMoving = false;
+    animator.flipX = false;
+    if (isWater) {
+        animator.play("fall_water", true);
+    }
+    else {
+        animator.play("lose", true);
+    }
 }
 
 void StudentPlayerEntity::applyBuff(TeacherBuffType buffType) {
@@ -86,27 +120,43 @@ void StudentPlayerEntity::applyBuff(TeacherBuffType buffType) {
 }
 
 bool StudentPlayerEntity::handleLethalDamage(EngineContext* ctx, const glm::vec2& rescuePos) {
+    if (m_isDead || m_isWon) return false;
+
     if (m_buffs.onTakeDamage(this)) {
+        if (ctx) ctx->audioEngine.play(m_shieldBreakSFX, AudioCategory::GameplaySFX);
         if (rescuePos != glm::vec2(0.0f, 0.0f)) {
             position = m_targetPosition = rescuePos;
         }
         return false;
     }
 
-    m_isDead = true;
+    bool isDrowning = isOnWaterLane;
+    playDeathAnimation(isDrowning);
+
+    if (ctx) {
+        if (isDrowning) {
+            ctx->audioEngine.play(m_waterSplashSFX, AudioCategory::GameplaySFX);
+        }
+        else {
+            ctx->audioEngine.play(m_deathSFX, AudioCategory::GameplaySFX);
+        }
+    }
+
     if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
     return true;
 }
 
 void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
-    if (m_isDead) return;
+    if (m_isDead || m_isWon) {
+        return;
+    }
+
     m_touchingLogThisFrame = false;
-    m_auraAnimTimer += dt;
+    m_auraAnimator.update(dt);
 
     m_buffs.onUpdate(dt, this);
     m_buffs.syncBlackboard(ctx);
 
-    // Tightened input buffer window: prevents high-speed lerp from consuming a residual press as a 2nd step
     const bool isSpeedBoosted = m_buffs.hasEffect(TeacherBuffType::SpeedBoost);
     const float maxBufferDuration = isSpeedBoosted ? 0.08f : 0.12f;
 
@@ -146,7 +196,6 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
             nextTarget.x = std::clamp(nextTarget.x, m_config.minX, m_config.maxX);
             nextTarget.y = (std::min)(m_config.maxY, nextTarget.y);
 
-            // Pre-check static obstacle obstruction
             static std::vector<CollisionResult> obstacleHits;
             obstacleHits.clear();
             glm::vec4 testBox{ nextTarget.x, nextTarget.y, size.x, size.y };
@@ -157,12 +206,13 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
                 m_isMoving = true;
                 m_hasStartedFirstMove = true;
                 playHopAnimation();
+
+                if (ctx) ctx->audioEngine.play(m_hopSFX, AudioCategory::GameplaySFX);
             }
             else {
                 playIdleAnimation();
             }
 
-            // Immediately flush buffer to prevent consecutive runaway steps
             m_inputBuffer = glm::vec2(0.0f, 0.0f);
             m_bufferTimer = 0.0f;
         }
@@ -180,7 +230,7 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
 }
 
 void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineContext* ctx) {
-    if (m_isDead) return;
+    if (m_isDead || m_isWon) return;
 
     if ((collision.targetLayer & CollisionLayer::Layer_Enemy) != 0) {
         handleLethalDamage(ctx);
@@ -198,7 +248,7 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
 }
 
 void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
-    if (m_isDead || m_isMoving) return;
+    if (m_isDead || m_isWon || m_isMoving) return;
 
     if (m_touchingLogThisFrame) {
         position.x += currentWaterVel.x * dt;
@@ -219,21 +269,25 @@ void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, 
     bool hasShield = m_buffs.hasEffect(TeacherBuffType::DeadlineShield);
     bool hasInvincible = m_buffs.hasEffect(TeacherBuffType::Invincibility);
 
-    if (hasSpeed || hasGpa || hasShield || hasInvincible) {
-        float pulse = 0.5f + 0.5f * std::sin(m_auraAnimTimer * 8.0f);
-        glm::vec4 auraColor = hasInvincible ? glm::vec4{ 0.2f, 0.9f, 1.0f, 0.45f + 0.25f * pulse }
-            : hasShield ? glm::vec4{ 1.0f, 0.85f, 0.2f, 0.40f + 0.20f * pulse }
-            : hasGpa ? glm::vec4{ 0.85f, 0.2f, 0.95f, 0.40f + 0.20f * pulse }
-        : glm::vec4{ 0.2f, 0.95f, 0.4f, 0.40f + 0.20f * pulse };
+    // 1. Render Animated Aura Sprite behind cat (Replaces solid rectangular box silhouette)
+    if (!m_isDead && (hasSpeed || hasGpa || hasShield || hasInvincible)) {
+        glm::vec4 auraTint = hasInvincible ? glm::vec4{ 0.2f, 0.9f, 1.0f, 0.90f }
+            : hasShield ? glm::vec4{ 1.0f, 0.85f, 0.2f, 0.90f }
+            : hasGpa ? glm::vec4{ 0.85f, 0.2f, 0.95f, 0.90f }
+        : glm::vec4{ 0.2f, 0.95f, 0.4f, 0.90f };
 
-        writeBuffer.push_command(m_config.renderDepth - 1, 0, RectPayload{
-            .dest_rect = { renderPos.x - 8.0f, renderPos.y - 8.0f, size.x + 16.0f, size.y + 16.0f },
-            .color = auraColor,
-            .no_texture = true,
-            .is_world_space = true
-            });
+        m_auraAnimator.draw(
+            writeBuffer,
+            ctx,
+            renderPos - m_config.spriteOffset,
+            m_config.spriteRenderSize,
+            auraTint,
+            m_config.renderDepth - 1,
+            true
+        );
     }
 
+    // 2. Render Main Character Animation (Idle, Hop, Win, Lose, Fallwater)
     animator.draw(
         writeBuffer,
         ctx,

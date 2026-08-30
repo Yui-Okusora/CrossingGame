@@ -5,13 +5,9 @@
 #include "HUD.hpp"
 #include "Gameplay.hpp"
 
-// ============================================================================
-// NAME INPUT SCREEN
-// ============================================================================
 void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
     TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
 
-    // 1. Fullscreen Main Menu Backdrop
     writeBuffer.push_command(50, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -20,7 +16,6 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
         .is_world_space = false
         });
 
-    // Dark Dimming Overlay
     writeBuffer.push_command(55, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.65f },
@@ -28,7 +23,6 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
         .is_world_space = false
         });
 
-    // 2. Dark Slate Modal Box
     glm::vec4 panelBounds{ 380.0f, 220.0f, 440.0f, 350.0f };
     writeBuffer.push_command(60, 0, RectPayload{
         .dest_rect = panelBounds,
@@ -37,14 +31,12 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
         .is_world_space = false
         });
 
-    // Modal Border Lines
     glm::vec4 borderCol{ 0.28f, 0.35f, 0.46f, 1.0f };
     writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y}, borderCol, 2.0f });
     writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
     writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x + panelBounds.z, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
     writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y + panelBounds.w}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
 
-    // 3. Header Title
     TextPayload title{
         .position = { panelBounds.x + (panelBounds.z * 0.5f), panelBounds.y + 35.0f },
         .color = { 1.0f, 0.85f, 0.2f, 1.0f },
@@ -54,7 +46,6 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
     std::snprintf(title.text_content, sizeof(title.text_content), "STUDENT PROFILE");
     writeBuffer.push_command(70, 0, title);
 
-    // 4. Text Input Box & Action Buttons
     float btnX = panelBounds.x + 40.0f;
     float btnW = panelBounds.z - 80.0f;
 
@@ -73,9 +64,14 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
     }
 }
 
-// ============================================================================
-// MAIN MENU SCREEN
-// ============================================================================
+void MainMenuLayer::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+    m_bgmMusic = ctx->audioEngine.loadSound(SFX_PATH "menu_bgm.wav", true);
+    if (!ctx->audioEngine.isPlaying(m_bgmMusic)) {
+        ctx->audioEngine.play(m_bgmMusic, AudioCategory::Music, true);
+    }
+}
+
 void MainMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
     TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
     TextureHandle playBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Play button.png");

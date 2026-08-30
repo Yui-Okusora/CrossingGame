@@ -8,6 +8,7 @@ private:
     glm::vec4 m_panelBounds{ 360.0f, 160.0f, 480.0f, 480.0f };
 
     std::string m_playerName = "HCMUS Student";
+    GameMode m_mode = GameMode::Campaign;
     int m_finalScore = 0;
     int m_highestScore = 0;
     int m_currentLevel = 1;

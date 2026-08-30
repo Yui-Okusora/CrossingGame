@@ -53,6 +53,7 @@ void ModeSelectLayer::populateRenderStream(RenderData& writeBuffer, EngineContex
     std::snprintf(campaignLabel, sizeof(campaignLabel), "CAMPAIGN (%d LEVELS)", MAX_CAMPAIGN_LEVELS);
 
     if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Campaign, { btnX, startY, btnW, 52.0f }, campaignLabel, 18.0f)) {
+        ctx->audioEngine.stop(ctx->audioEngine.loadSound(SFX_PATH "menu_bgm.wav"));
         ctx->blackboard.set("gameMode", static_cast<int>(GameMode::Campaign));
         ctx->blackboard.set("currentLevel", 1);
         ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
@@ -62,6 +63,7 @@ void ModeSelectLayer::populateRenderStream(RenderData& writeBuffer, EngineContex
     }
 
     if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Endless, { btnX, startY + gap, btnW, 52.0f }, "ENDLESS SURVIVAL", 18.0f)) {
+        ctx->audioEngine.stop(ctx->audioEngine.loadSound(SFX_PATH "menu_bgm.wav"));
         ctx->blackboard.set("gameMode", static_cast<int>(GameMode::Endless));
         ctx->blackboard.set("currentLevel", 1);
         ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());

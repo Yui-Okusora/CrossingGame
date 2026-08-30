@@ -15,9 +15,9 @@ struct PlayerConfig {
     glm::vec2 hitboxSize{ 28.0f, 36.0f };
     glm::vec2 spriteRenderSize{ 64.0f, 64.0f };
     glm::vec2 spriteOffset{ 18.0f, 8.0f };
-    float gridSize = 64.0f;                     // Strictly locked to single 64px grid hops
+    float gridSize = 64.0f;
     float defaultLerpSpeed = 22.0f;
-    float boostedLerpSpeed = 36.0f;             // High-speed lerp during speed boost
+    float boostedLerpSpeed = 36.0f;
     float currentLerpSpeed = 22.0f;
     float minX = 0.0f;
     float maxX = 1152.0f;
@@ -36,12 +36,21 @@ private:
     bool m_isMoving = false;
     bool m_hasStartedFirstMove = false;
     bool m_isDead = false;
+    bool m_isWon = false;
     bool m_touchingLogThisFrame = false;
 
     glm::vec2 m_inputBuffer{ 0.0f, 0.0f };
     float m_bufferTimer = 0.0f;
     int m_scoreMultiplier = 1;
-    float m_auraAnimTimer = 0.0f;
+
+    // Buff Aura Animated Sprite Component (Replaces rectangular glow silhouette)
+    Animator2D m_auraAnimator;
+
+    // Audio SFX Handles
+    AudioHandle m_hopSFX{ 0 };
+    AudioHandle m_deathSFX{ 0 };
+    AudioHandle m_waterSplashSFX{ 0 };
+    AudioHandle m_shieldBreakSFX{ 0 };
 
     void playHopAnimation();
     void playIdleAnimation();
@@ -62,6 +71,10 @@ public:
     [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
     [[nodiscard]] bool hasStartedFirstMove() const noexcept { return m_hasStartedFirstMove; }
     [[nodiscard]] bool isDead() const noexcept { return m_isDead; }
+    [[nodiscard]] bool isWon() const noexcept { return m_isWon; }
+
+    void playWinAnimation();
+    void playDeathAnimation(bool isWater);
 
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;
