@@ -6,6 +6,7 @@ class DeadlinePopupLayer : public IEngineLayer {
 private:
     glm::vec4 m_panelBounds{ 380.0f, 180.0f, 440.0f, 440.0f };
     AudioHandle m_alertSFX{ 0 };
+    float m_lifetime{ 5.0f };
 
 public:
     DeadlinePopupLayer() = default;
@@ -19,6 +20,6 @@ public:
     [[nodiscard]] bool blocksUpdates() const noexcept override { return false; }
 
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
-    void update(double dt, EngineContext* ctx) override {}
+    void update(double dt, EngineContext* ctx) override;
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
 };

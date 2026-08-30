@@ -7,7 +7,7 @@ private:
     glm::vec4 m_panelBounds{ 400.0f, 180.0f, 400.0f, 420.0f };
 
     float m_masterVol = 1.0f;
-    float m_musicVol = 0.5f;
+    float m_musicVol = 1.0f;
     float m_sfxVol = 1.0f;
 
 public:
