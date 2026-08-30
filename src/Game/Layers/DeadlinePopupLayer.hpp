@@ -16,7 +16,7 @@ public:
 
     // Freezes physics simulation and input for gameplay layers underneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return true; }
-    [[nodiscard]] bool blocksUpdates() const noexcept override { return true; }
+    [[nodiscard]] bool blocksUpdates() const noexcept override { return false; }
 
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
     void update(double dt, EngineContext* ctx) override {}
