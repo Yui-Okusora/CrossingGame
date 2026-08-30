@@ -66,7 +66,7 @@ void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
 
 void MainMenuLayer::onAttach(EngineContext* ctx) {
     if (!ctx) return;
-    m_bgmMusic = ctx->audioEngine.loadSound(SFX_PATH "menu_bgm.wav", true);
+    //m_bgmMusic = ctx->audioEngine.loadSound(SFX_PATH "menu_bgm.wav", true);
     if (!ctx->audioEngine.isPlaying(m_bgmMusic)) {
         ctx->audioEngine.play(m_bgmMusic, AudioCategory::Music, true);
     }
