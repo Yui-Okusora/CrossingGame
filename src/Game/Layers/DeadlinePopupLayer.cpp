@@ -11,7 +11,7 @@ void DeadlinePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ct
 void DeadlinePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
     TextureHandle deadlineTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/DeadlinePopup/DeadlinePopup.png");
 
-    // 1. Fullscreen Dimming Backdrop (Depth: 750)[cite: 1]
+    // 1. Fullscreen Dimming Backdrop (Depth: 750)
     writeBuffer.push_command(750, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.78f },
