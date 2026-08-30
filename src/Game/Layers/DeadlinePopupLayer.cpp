@@ -6,6 +6,11 @@ void DeadlinePopupLayer::onAttach(EngineContext* ctx) {
     ctx->audioEngine.play(m_alertSFX, AudioCategory::GameplaySFX);
 }
 
+void DeadlinePopupLayer::onDetach(EngineContext* ctx) {
+    if (!ctx) return;
+    ctx->blackboard.set("deadlinePopup", false);
+}
+
 void DeadlinePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {}
 
 void DeadlinePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
