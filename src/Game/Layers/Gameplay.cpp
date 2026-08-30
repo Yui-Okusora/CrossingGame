@@ -27,7 +27,6 @@ void GameplayLayer::onAttach(EngineContext* ctx) {
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
     if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
-    // Retrieve persistent high score from blackboard
     if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) {
         m_highestScore = *highScoreOpt;
     }
@@ -46,13 +45,21 @@ void GameplayLayer::onAttach(EngineContext* ctx) {
     ctx->blackboard.set("currentLevel", m_currentLevel);
     ctx->blackboard.set("maxLevel", m_maxLevel);
 
-    m_texSafeZone = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
+    // Terrain Textures
+    m_texGrassStart = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassStart.png");
+    m_texGrassSafePath = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
+    m_texGrassEnd = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassEnd.png");
+    m_texLevelUpLine = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/LevelUpLine.png");
     m_texRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Road/Road.png");
     m_texElevatorRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/ElevatorRoad.png");
     m_texCodeLine = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine.png");
     m_texWater = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/River/River.png");
     m_texBusSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
     m_texExamPaper = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/ExamPaper/ExamPaper.png");
+
+    // 2-State Elevator Doors
+    m_texElevatorClosed = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-closed.png");
+    m_texElevatorOpened = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/elevator-opened.png");
 
     m_codeObstacleTextures = {
         ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-NullPtr.png"),
@@ -151,11 +158,14 @@ void GameplayLayer::generateLanesForLevel(int level) {
     float laneHeight = 64.0f;
 
     m_lanes.clear();
+
+    // Two starting grass lanes
     m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
+    m_lanes.push_back({ startY - laneHeight, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
 
     const LaneType hazardPool[] = { LaneType::Asphalt, LaneType::ElevatorTile, LaneType::IDELane, LaneType::Water };
 
-    int currentLaneIdx = 1;
+    int currentLaneIdx = 2;
     int consecutiveHazards = 0;
     int lastDirection = 1;
     int sameDirStreak = 0;
@@ -203,7 +213,7 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
         return;
     }
 
-    if (lane.type == LaneType::SafeZone && lane.yPosition < 741.0f) {
+    if (lane.type == LaneType::SafeZone && lane.yPosition < 677.0f) {
         int benchCount = std::uniform_int_distribution<int>(1, 3)(laneRng);
         std::vector<int> validCols(16);
         std::iota(validCols.begin(), validCols.end(), 1);
@@ -265,8 +275,8 @@ void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext*
             float x = std::fmod((l * sector) + lane.spawnXOffset, 1050.0f);
             auto* platform = m_scene.spawn<MovingHazardEntity>(
                 ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
-                glm::vec2(170.0f, 50.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
-                true, 7.0f, glm::vec4(1.0f), 25
+                glm::vec2(160.0f, 46.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
+                true, 8.0f, glm::vec4(1.0f), 25
             );
             platform->animator.addAnimation("float", AnimationClip{ m_texExamPaper, { 1, 1 }, 0, 0, 1.0f, false });
             platform->animator.play("float");
@@ -295,16 +305,16 @@ void GameplayLayer::updateElevatorSignals(float dt) {
 
         lane.signalTimer += dt;
         if (lane.signalPhase == 0 && lane.signalTimer >= 3.0f) {
-            lane.signalPhase = 1; lane.signalTimer = 0.0f;
+            lane.signalPhase = 1; lane.signalTimer = 0.0f; // Red -> Yellow (Door opens)
         }
         else if (lane.signalPhase == 1 && lane.signalTimer >= 1.2f) {
-            lane.signalPhase = 2; lane.signalTimer = 0.0f;
+            lane.signalPhase = 2; lane.signalTimer = 0.0f; // Yellow -> Green (Crowd rushes)
         }
         else if (lane.signalPhase == 2) {
             bool finished = (crowdIdx < m_elevatorCrowds.size() && m_elevatorCrowds[crowdIdx])
                 ? m_elevatorCrowds[crowdIdx]->hasFinishedCrossing() : true;
             if (finished) {
-                lane.signalPhase = 0; lane.signalTimer = 0.0f;
+                lane.signalPhase = 0; lane.signalTimer = 0.0f; // Crowd finished -> Door closes (Red)
             }
         }
 
@@ -401,7 +411,9 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
 }
 
 void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    for (const auto& lane : m_lanes) {
+    for (size_t i = 0; i < m_lanes.size(); ++i) {
+        const auto& lane = m_lanes[i];
+
         if (lane.type == LaneType::Water) {
             uint32_t col = lane.waterAnimFrame % m_waterAtlasDims.x;
             uint32_t row = lane.waterAnimFrame / m_waterAtlasDims.x;
@@ -417,9 +429,27 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
             continue;
         }
 
-        TextureHandle tex = (lane.type == LaneType::SafeZone) ? m_texSafeZone :
-            (lane.type == LaneType::Asphalt) ? m_texRoad :
-            (lane.type == LaneType::ElevatorTile) ? m_texElevatorRoad : m_texCodeLine;
+        TextureHandle tex = m_texGrassSafePath;
+        if (lane.type == LaneType::SafeZone) {
+            if (i == 0 || i == 1) {
+                tex = m_texGrassStart;
+            }
+            else if (i == m_lanes.size() - 1 && m_mode == GameMode::Campaign) {
+                tex = (m_currentLevel == m_maxLevel) ? m_texGrassEnd : m_texLevelUpLine;
+            }
+            else {
+                tex = m_texGrassSafePath;
+            }
+        }
+        else if (lane.type == LaneType::Asphalt) {
+            tex = m_texRoad;
+        }
+        else if (lane.type == LaneType::ElevatorTile) {
+            tex = m_texElevatorRoad;
+        }
+        else if (lane.type == LaneType::IDELane) {
+            tex = m_texCodeLine;
+        }
 
         writeBuffer.push_command(10, 0, RectPayload{
             .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height },
@@ -429,12 +459,28 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
             .is_world_space = true
             });
 
+        // 2-State Elevator Door Entrances: Phase 0 is closed; Phase 1 (Yellow light) and Phase 2 (Green) are opened
         if (lane.type == LaneType::ElevatorTile) {
-            glm::vec4 color = (lane.signalPhase == 0) ? glm::vec4{ 0.9f, 0.1f, 0.1f, 1.0f } :
-                (lane.signalPhase == 1) ? glm::vec4{ 0.9f, 0.8f, 0.1f, 1.0f } : glm::vec4{ 0.1f, 0.9f, 0.2f, 1.0f };
+            TextureHandle doorTex = (lane.signalPhase == 0) ? m_texElevatorClosed : m_texElevatorOpened;
 
-            writeBuffer.push_command(15, 0, RectPayload{ .dest_rect = { 15.0f, lane.yPosition + 12.0f, 24.0f, 40.0f }, .color = color, .no_texture = true, .is_world_space = true });
-            writeBuffer.push_command(15, 0, RectPayload{ .dest_rect = { 1161.0f, lane.yPosition + 12.0f, 24.0f, 40.0f }, .color = color, .no_texture = true, .is_world_space = true });
+            // Left Elevator Entrance
+            writeBuffer.push_command(15, 0, RectPayload{
+                .dest_rect = { 0.0f, lane.yPosition, 64.0f, 64.0f },
+                .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .texture = doorTex,
+                .no_texture = false,
+                .is_world_space = true
+                });
+
+            // Right Elevator Entrance
+            writeBuffer.push_command(15, 0, RectPayload{
+                .dest_rect = { 1136.0f, lane.yPosition, 64.0f, 64.0f },
+                .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .texture = doorTex,
+                .flip_x = true,
+                .no_texture = false,
+                .is_world_space = true
+                });
         }
     }
 

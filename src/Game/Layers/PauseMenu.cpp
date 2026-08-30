@@ -54,59 +54,60 @@ void PauseMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
     // ========================================================================
     float px = m_panelBounds.x;
     float py = m_panelBounds.y;
-    float pw = m_panelBounds.z;
-    float ph = m_panelBounds.w;
 
-    float keySize = 58.0f;
+    float keySize = 56.0f;
 
-    // Top Row: Settings (Gear) & Save (Floppy Disk)
-    glm::vec4 settingBounds{ px + (pw * 0.232f), py + (ph * 0.135f), keySize, keySize };
-    glm::vec4 saveBounds{ px + (pw * 0.428f), py + (ph * 0.135f), keySize, keySize };
+    // Row 1: Settings (Gear) & Save (Floppy Disk)
+    glm::vec4 settingBounds{ px + 124.0f, py + 52.0f, keySize, keySize };
+    glm::vec4 saveBounds{ px + 242.0f, py + 52.0f, keySize, keySize };
 
-    // Middle Row: Restart (Undo Arrow) & Resume (Play Arrow)
-    glm::vec4 restartBounds{ px + (pw * 0.330f), py + (ph * 0.470f), keySize, keySize };
-    glm::vec4 playBounds{ px + (pw * 0.526f), py + (ph * 0.470f), keySize, keySize };
+    // Row 2: Restart (Undo Arrow) & Resume (Play Arrow)
+    glm::vec4 restartBounds{ px + 182.0f, py + 148.0f, keySize, keySize };
+    glm::vec4 playBounds{ px + 300.0f, py + 148.0f, keySize, keySize };
 
-    // Bottom-Right: Main Menu (ESC Key - Wider 1.5u Keycap)
-    glm::vec4 escBounds{ px + (pw * 0.772f), py + (ph * 0.680f), 80.0f, keySize };
+    // Row 3: Main Menu (ESC Key - Wide 1.5u Keycap)
+    glm::vec4 escBounds{ px + 440.0f, py + 208.0f, 88.0f, keySize };
 
-    // --- BUTTON CLICKS ---
-    // SETTINGS BUTTON (Gear)
+    // SETTINGS BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Settings, settingBounds, settingBtnTex, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<SettingsMenuLayer>());
         return;
     }
 
-    // SAVE BUTTON (Floppy)
+    // SAVE BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Save, saveBounds, saveBtnTex, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<SaveMenuLayer>());
         return;
     }
 
-    // RESTART BUTTON (Undo Arrow)
+    // RESTART BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Restart, restartBounds, restartBtnTex, { 2, 1 })) {
+        ctx->blackboard.set("currentLevel", 1);
+        ctx->blackboard.set("currentScore", 0);
+        ctx->blackboard.set("elapsedTime", 0.0f);
+
         ctx->layerStack->deferClear();
         ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
         ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
         return;
     }
 
-    // RESUME BUTTON (Play Arrow)
+    // RESUME BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Resume, playBounds, playBtnTex, { 2, 1 })) {
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    // MAIN MENU BUTTON (ESC)
+    // MAIN MENU BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_MainMenu, escBounds, mainMenuBtnTex, { 2, 1 })) {
         ctx->layerStack->clear(ctx);
         ctx->layerStack->pushLayer(std::make_unique<MainMenuLayer>(), ctx);
         return;
     }
 
-    // 5. Helper Legend below the panel
+    // Helper Legend
     TextPayload legendText{
-        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + m_panelBounds.w + 28.0f },
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + m_panelBounds.w + 24.0f },
         .color = { 0.75f, 0.8f, 0.85f, 0.9f },
         .scale = 16.0f,
         .showInCenter = true

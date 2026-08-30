@@ -3,14 +3,13 @@
 #include <algorithm>
 #include <cmath>
 
-void SpeedBoostEffect::onApply(StudentPlayerEntity* player) { player->setSpeedModifier(38.0f); }
-void SpeedBoostEffect::onRemove(StudentPlayerEntity* player) { player->setSpeedModifier(22.0f); }
+void SpeedBoostEffect::onApply(StudentPlayerEntity* player) { player->setSpeedBoostActive(true); }
+void SpeedBoostEffect::onRemove(StudentPlayerEntity* player) { player->setSpeedBoostActive(false); }
 void GpaMultiplierEffect::onApply(StudentPlayerEntity* player) { player->setScoreMultiplier(2); }
 void GpaMultiplierEffect::onRemove(StudentPlayerEntity* player) { player->setScoreMultiplier(1); }
 
 void DeadlineShieldEffect::onRemove(StudentPlayerEntity* player) {
     if (m_consumed) {
-        // Automatically grant invulnerability upon shield removal
         player->applyBuff(TeacherBuffType::Invincibility);
     }
 }
@@ -27,8 +26,45 @@ StudentPlayerEntity::StudentPlayerEntity(const glm::vec2& startPos, GameplayLaye
 void StudentPlayerEntity::onAttach(EngineContext* ctx) {
     if (!ctx) return;
     TextureHandle catSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Cat character rework - animation.png");
-    animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 0, 1, 0.35f, true });
-    animator.addAnimation("hop", AnimationClip{ catSheet, { 6, 4 }, 6, 11, 0.06f, true });
+
+    // Row 0: Down Movement (Frames 0 - 5)
+    animator.addAnimation("hop_down", AnimationClip{ catSheet, { 6, 4 }, 0, 5, 0.05f, true });
+
+    // Row 1: Up Movement (Frames 6 - 11)
+    animator.addAnimation("hop_up", AnimationClip{ catSheet, { 6, 4 }, 6, 11, 0.05f, true });
+
+    // Row 2: Side Movement (Frames 12 - 17, flipX handles Left)
+    animator.addAnimation("hop_side", AnimationClip{ catSheet, { 6, 4 }, 12, 17, 0.05f, true });
+
+    // Row 3: Universal Idle (Frames 18 - 21)
+    animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 18, 21, 0.28f, true });
+
+    playIdleAnimation();
+}
+
+void StudentPlayerEntity::playHopAnimation() {
+    switch (m_facing) {
+    case PlayerDirection::Down:
+        animator.flipX = false;
+        animator.play("hop_down");
+        break;
+    case PlayerDirection::Up:
+        animator.flipX = false;
+        animator.play("hop_up");
+        break;
+    case PlayerDirection::Right:
+        animator.flipX = false;
+        animator.play("hop_side");
+        break;
+    case PlayerDirection::Left:
+        animator.flipX = true;
+        animator.play("hop_side");
+        break;
+    }
+}
+
+void StudentPlayerEntity::playIdleAnimation() {
+    animator.flipX = false;
     animator.play("idle");
 }
 
@@ -54,7 +90,7 @@ bool StudentPlayerEntity::handleLethalDamage(EngineContext* ctx, const glm::vec2
         if (rescuePos != glm::vec2(0.0f, 0.0f)) {
             position = m_targetPosition = rescuePos;
         }
-        return false; // Survived damage via status effect mitigation (shield/invincibility)
+        return false;
     }
 
     m_isDead = true;
@@ -65,22 +101,42 @@ bool StudentPlayerEntity::handleLethalDamage(EngineContext* ctx, const glm::vec2
 void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
     if (m_isDead) return;
     m_touchingLogThisFrame = false;
+    m_auraAnimTimer += dt;
 
     m_buffs.onUpdate(dt, this);
     m_buffs.syncBlackboard(ctx);
 
+    // Tightened input buffer window: prevents high-speed lerp from consuming a residual press as a 2nd step
+    const bool isSpeedBoosted = m_buffs.hasEffect(TeacherBuffType::SpeedBoost);
+    const float maxBufferDuration = isSpeedBoosted ? 0.08f : 0.12f;
+
     glm::vec2 freshDir{ 0.0f, 0.0f };
-    if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP))    freshDir.y -= m_config.gridSize;
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN))  freshDir.y += m_config.gridSize;
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT))  freshDir.x -= m_config.gridSize;
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) freshDir.x += m_config.gridSize;
+    if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP)) {
+        freshDir.y -= m_config.gridSize;
+        m_facing = PlayerDirection::Up;
+    }
+    else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN)) {
+        freshDir.y += m_config.gridSize;
+        m_facing = PlayerDirection::Down;
+    }
+    else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT)) {
+        freshDir.x -= m_config.gridSize;
+        m_facing = PlayerDirection::Left;
+    }
+    else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) {
+        freshDir.x += m_config.gridSize;
+        m_facing = PlayerDirection::Right;
+    }
 
     if (freshDir != glm::vec2(0.0f, 0.0f)) {
         m_inputBuffer = freshDir;
-        m_bufferTimer = 0.18f;
+        m_bufferTimer = maxBufferDuration;
     }
-    else if (m_bufferTimer > 0.0f && (m_bufferTimer -= dt) <= 0.0f) {
-        m_inputBuffer = glm::vec2(0.0f, 0.0f);
+    else if (m_bufferTimer > 0.0f) {
+        m_bufferTimer -= dt;
+        if (m_bufferTimer <= 0.0f) {
+            m_inputBuffer = glm::vec2(0.0f, 0.0f);
+        }
     }
 
     if (!m_isMoving) {
@@ -90,24 +146,35 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
             nextTarget.x = std::clamp(nextTarget.x, m_config.minX, m_config.maxX);
             nextTarget.y = (std::min)(m_config.maxY, nextTarget.y);
 
-            if (nextTarget != position) {
+            // Pre-check static obstacle obstruction
+            static std::vector<CollisionResult> obstacleHits;
+            obstacleHits.clear();
+            glm::vec4 testBox{ nextTarget.x, nextTarget.y, size.x, size.y };
+            ctx->collisionWorld.query_aabb(testBox, CollisionLayer::Layer_Player, CollisionLayer::Layer_Obstacle, obstacleHits, id);
+
+            if (obstacleHits.empty() && nextTarget != position) {
                 m_targetPosition = nextTarget;
                 m_isMoving = true;
                 m_hasStartedFirstMove = true;
+                playHopAnimation();
             }
+            else {
+                playIdleAnimation();
+            }
+
+            // Immediately flush buffer to prevent consecutive runaway steps
             m_inputBuffer = glm::vec2(0.0f, 0.0f);
             m_bufferTimer = 0.0f;
         }
     }
 
     if (m_isMoving) {
-        animator.play("hop");
         float factor = 1.0f - std::exp(-m_config.currentLerpSpeed * dt);
         position = glm::mix(position, m_targetPosition, factor);
         if (glm::distance(position, m_targetPosition) < 0.5f) {
             position = m_targetPosition;
             m_isMoving = false;
-            animator.play("idle");
+            playIdleAnimation();
         }
     }
 }
@@ -122,6 +189,8 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
         position = m_targetPosition = prevPosition;
         m_isMoving = false;
         m_inputBuffer = glm::vec2(0.0f, 0.0f);
+        m_bufferTimer = 0.0f;
+        playIdleAnimation();
     }
     else if ((collision.targetLayer & CollisionLayer::Layer_TriggerVolume) != 0) {
         m_touchingLogThisFrame = true;
@@ -145,6 +214,26 @@ void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
 }
 
 void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
+    bool hasSpeed = m_buffs.hasEffect(TeacherBuffType::SpeedBoost);
+    bool hasGpa = m_buffs.hasEffect(TeacherBuffType::GpaMultiplier);
+    bool hasShield = m_buffs.hasEffect(TeacherBuffType::DeadlineShield);
+    bool hasInvincible = m_buffs.hasEffect(TeacherBuffType::Invincibility);
+
+    if (hasSpeed || hasGpa || hasShield || hasInvincible) {
+        float pulse = 0.5f + 0.5f * std::sin(m_auraAnimTimer * 8.0f);
+        glm::vec4 auraColor = hasInvincible ? glm::vec4{ 0.2f, 0.9f, 1.0f, 0.45f + 0.25f * pulse }
+            : hasShield ? glm::vec4{ 1.0f, 0.85f, 0.2f, 0.40f + 0.20f * pulse }
+            : hasGpa ? glm::vec4{ 0.85f, 0.2f, 0.95f, 0.40f + 0.20f * pulse }
+        : glm::vec4{ 0.2f, 0.95f, 0.4f, 0.40f + 0.20f * pulse };
+
+        writeBuffer.push_command(m_config.renderDepth - 1, 0, RectPayload{
+            .dest_rect = { renderPos.x - 8.0f, renderPos.y - 8.0f, size.x + 16.0f, size.y + 16.0f },
+            .color = auraColor,
+            .no_texture = true,
+            .is_world_space = true
+            });
+    }
+
     animator.draw(
         writeBuffer,
         ctx,
@@ -154,23 +243,4 @@ void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, 
         m_config.renderDepth,
         true
     );
-
-    if (m_buffs.hasEffect(TeacherBuffType::Invincibility)) {
-        if (static_cast<int>(m_buffs.getRemainingTime(TeacherBuffType::Invincibility) * 12.0f) % 2 == 0) {
-            writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
-                .dest_rect = { renderPos.x - 4.0f, renderPos.y - 4.0f, size.x + 8.0f, size.y + 8.0f },
-                .color = { 0.2f, 0.9f, 1.0f, 0.6f },
-                .no_texture = true,
-                .is_world_space = true
-                });
-        }
-    }
-    else if (m_buffs.hasEffect(TeacherBuffType::DeadlineShield)) {
-        writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
-            .dest_rect = { renderPos.x - 2.0f, renderPos.y - 2.0f, size.x + 4.0f, size.y + 4.0f },
-            .color = { 1.0f, 0.85f, 0.1f, 0.45f },
-            .no_texture = true,
-            .is_world_space = true
-            });
-    }
 }

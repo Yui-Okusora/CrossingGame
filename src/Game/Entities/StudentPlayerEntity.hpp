@@ -4,12 +4,20 @@
 
 class GameplayLayer;
 
+enum class PlayerDirection : uint8_t {
+    Down,
+    Up,
+    Left,
+    Right
+};
+
 struct PlayerConfig {
     glm::vec2 hitboxSize{ 28.0f, 36.0f };
     glm::vec2 spriteRenderSize{ 64.0f, 64.0f };
-    glm::vec2 spriteOffset{ 18.0f, 14.0f };
-    float gridSize = 64.0f;
+    glm::vec2 spriteOffset{ 18.0f, 8.0f };
+    float gridSize = 64.0f;                     // Strictly locked to single 64px grid hops
     float defaultLerpSpeed = 22.0f;
+    float boostedLerpSpeed = 36.0f;             // High-speed lerp during speed boost
     float currentLerpSpeed = 22.0f;
     float minX = 0.0f;
     float maxX = 1152.0f;
@@ -23,6 +31,7 @@ private:
     PlayerConfig m_config;
     StatusEffectComposite m_buffs;
 
+    PlayerDirection m_facing = PlayerDirection::Up;
     glm::vec2 m_targetPosition{ 0.0f, 0.0f };
     bool m_isMoving = false;
     bool m_hasStartedFirstMove = false;
@@ -32,6 +41,10 @@ private:
     glm::vec2 m_inputBuffer{ 0.0f, 0.0f };
     float m_bufferTimer = 0.0f;
     int m_scoreMultiplier = 1;
+    float m_auraAnimTimer = 0.0f;
+
+    void playHopAnimation();
+    void playIdleAnimation();
 
 public:
     bool isOnWaterLane = false;
@@ -42,7 +55,9 @@ public:
     void onAttach(EngineContext* ctx) override;
     void applyBuff(TeacherBuffType buffType);
 
-    void setSpeedModifier(float speed) noexcept { m_config.currentLerpSpeed = speed; }
+    void setSpeedBoostActive(bool active) noexcept {
+        m_config.currentLerpSpeed = active ? m_config.boostedLerpSpeed : m_config.defaultLerpSpeed;
+    }
     void setScoreMultiplier(int mult) noexcept { m_scoreMultiplier = mult; }
     [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
     [[nodiscard]] bool hasStartedFirstMove() const noexcept { return m_hasStartedFirstMove; }

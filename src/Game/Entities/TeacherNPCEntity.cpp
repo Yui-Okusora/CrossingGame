@@ -1,6 +1,5 @@
 #include "TeacherNPCEntity.hpp"
 #include "StudentPlayerEntity.hpp"
-#include <iostream>
 
 TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrolB, TeacherBuffType buff)
     : m_buffType(buff) {
@@ -23,8 +22,10 @@ void TeacherNPCEntity::onAttach(EngineContext* ctx) {
         : RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png";
 
     TextureHandle teacherSheet = ctx->assetManager.loadTexture(sheetPath);
-    animator.addAnimation("patrol", AnimationClip{ teacherSheet, { 6, 4 }, 0, 5, 0.14f, true });
-    animator.play("patrol");
+
+    // Row 2: Side Walk Animation (Frames 12 - 17)
+    animator.addAnimation("patrol_side", AnimationClip{ teacherSheet, { 6, 4 }, 12, 17, 0.12f, true });
+    animator.play("patrol_side");
 }
 
 void TeacherNPCEntity::onUpdate(float dt, EngineContext* ctx) {
@@ -63,5 +64,5 @@ void TeacherNPCEntity::onCollision(const CollisionInfo& collision, EngineContext
 
 void TeacherNPCEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
     if (m_isBuffGiven) return;
-    animator.draw(writeBuffer, ctx, { renderPos.x + 10.0f, renderPos.y + 10.0f }, size, glm::vec4(1.0f), m_renderDepth, true);
+    animator.draw(writeBuffer, ctx, renderPos - glm::vec2(10.0f, 10.0f), glm::vec2(64.0f, 64.0f), glm::vec4(1.0f), m_renderDepth, true);
 }

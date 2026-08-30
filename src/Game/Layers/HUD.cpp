@@ -32,53 +32,14 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
     float seconds = std::fmod(m_elapsedTime, 60.0f);
 
     // ========================================================================
-    // 1. TOP TELEMETRY RIBBON
+    // 1. STUDENT ID CARD (Positioned on the LEFT, Scaled up)
     // ========================================================================
-    float ribbonWidth = (m_mode == GameMode::Endless) ? 1200.0f : 940.0f;
-    writeBuffer.push_command(500, 0, RectPayload{
-        .dest_rect = { 0.0f, 0.0f, ribbonWidth, 54.0f },
-        .color = { 0.06f, 0.08f, 0.10f, 0.95f },
-        .no_texture = true,
-        .is_world_space = false
-        });
+    float idX = 18.0f;
+    float idY = 8.0f;
+    float idW = 260.0f;
+    float idH = 138.0f;
 
-    // Score & High Score Text
-    TextPayload scoreText{
-        .position = { 20.0f, 34.0f },
-        .color = { 1.0f, 0.9f, 0.2f, 1.0f },
-        .scale = 20.0f,
-        .showInCenter = false
-    };
-    std::snprintf(scoreText.text_content, sizeof(scoreText.text_content), "SCORE: %d (HIGH: %d)", m_currentScore, m_highestScore);
-    writeBuffer.push_command(510, 0, scoreText);
-
-    // Endless Mode Telemetry
-    if (m_mode == GameMode::Endless) {
-        TextPayload levelText{
-            .position = { 600.0f, 34.0f },
-            .color = { 0.3f, 0.85f, 1.0f, 1.0f },
-            .scale = 22.0f,
-            .showInCenter = true
-        };
-        std::snprintf(levelText.text_content, sizeof(levelText.text_content), "ENDLESS MODE");
-        writeBuffer.push_command(510, 0, levelText);
-
-        TextPayload timeText{
-            .position = { 1100.0f, 34.0f },
-            .color = { 0.2f, 1.0f, 0.4f, 1.0f },
-            .scale = 22.0f,
-            .showInCenter = true
-        };
-        std::snprintf(timeText.text_content, sizeof(timeText.text_content), "TIME: %02d:%04.1f", minutes, seconds);
-        writeBuffer.push_command(510, 0, timeText);
-    }
-
-    // ========================================================================
-    // 2. STUDENT ID CARD (Campaign Mode Only)
-    // ========================================================================
     if (m_mode == GameMode::Campaign) {
-        float idX = 960.0f, idY = 4.0f, idW = 220.0f, idH = 116.0f;
-
         writeBuffer.push_command(515, 0, RectPayload{
             .dest_rect = { idX, idY, idW, idH },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -93,7 +54,7 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         );
 
         writeBuffer.push_command(520, 0, RectPayload{
-            .dest_rect = { idX + 128.0f, idY + 50.0f, 76.0f, 18.0f },
+            .dest_rect = { idX + 150.0f, idY + 60.0f, 92.0f, 22.0f },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
             .texture = pointMeter,
             .atlas_dimensions = { 11, 1 },
@@ -103,9 +64,9 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
             });
 
         TextPayload expTimeText{
-            .position = { idX + 144.0f, idY + 86.0f },
+            .position = { idX + 170.0f, idY + 104.0f },
             .color = { 0.08f, 0.10f, 0.14f, 1.0f },
-            .scale = 14.0f,
+            .scale = 16.0f,
             .showInCenter = false
         };
         std::snprintf(expTimeText.text_content, sizeof(expTimeText.text_content), "%02d:%04.1f", minutes, seconds);
@@ -113,10 +74,52 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
     }
 
     // ========================================================================
-    // 3. VERTICAL DROPDOWN STATUS BUFF BADGES
+    // 2. TOP TELEMETRY RIBBON
     // ========================================================================
-    float badgeX = 20.0f;
-    float currentBadgeY = 64.0f;
+    float ribbonX = (m_mode == GameMode::Campaign) ? (idX + idW + 16.0f) : 0.0f;
+    float ribbonW = (m_mode == GameMode::Campaign) ? (1200.0f - ribbonX) : 1200.0f;
+
+    writeBuffer.push_command(500, 0, RectPayload{
+        .dest_rect = { ribbonX, 0.0f, ribbonW, 54.0f },
+        .color = { 0.06f, 0.08f, 0.10f, 0.95f },
+        .no_texture = true,
+        .is_world_space = false
+        });
+
+    TextPayload scoreText{
+        .position = { ribbonX + 24.0f, 34.0f },
+        .color = { 1.0f, 0.9f, 0.2f, 1.0f },
+        .scale = 20.0f,
+        .showInCenter = false
+    };
+    std::snprintf(scoreText.text_content, sizeof(scoreText.text_content), "SCORE: %d (HIGH: %d)", m_currentScore, m_highestScore);
+    writeBuffer.push_command(510, 0, scoreText);
+
+    if (m_mode == GameMode::Endless) {
+        TextPayload levelText{
+            .position = { 600.0f, 34.0f },
+            .color = { 0.3f, 0.85f, 1.0f, 1.0f },
+            .scale = 22.0f,
+            .showInCenter = true
+        };
+        std::snprintf(levelText.text_content, sizeof(levelText.text_content), "ENDLESS MODE");
+        writeBuffer.push_command(510, 0, levelText);
+
+        TextPayload timeText{
+            .position = { 1080.0f, 34.0f },
+            .color = { 0.2f, 1.0f, 0.4f, 1.0f },
+            .scale = 22.0f,
+            .showInCenter = true
+        };
+        std::snprintf(timeText.text_content, sizeof(timeText.text_content), "TIME: %02d:%04.1f", minutes, seconds);
+        writeBuffer.push_command(510, 0, timeText);
+    }
+
+    // ========================================================================
+    // 3. VERTICAL DROPDOWN STATUS BUFF BADGES (Under ID card)
+    // ========================================================================
+    float badgeX = 18.0f;
+    float currentBadgeY = (m_mode == GameMode::Campaign) ? (idY + idH + 12.0f) : 64.0f;
     float badgeH = 30.0f;
     float badgeGap = 8.0f;
 
@@ -126,7 +129,6 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         float centerX = boxX + (boxW * 0.5f);
         float centerY = currentBadgeY + (badgeH * 0.5f) + 5.0f;
 
-        // 1. Background Box (Depth: 520)
         writeBuffer.push_command(520, 0, RectPayload{
             .dest_rect = { boxX, currentBadgeY, boxW, badgeH },
             .color = boxColor,
@@ -134,13 +136,11 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
             .is_world_space = false
             });
 
-        // 2. Box Border Outlines (Depth: 525)
         writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY}, {boxX + boxW, currentBadgeY}, borderColor, 1.5f });
         writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY}, {boxX, currentBadgeY + badgeH}, borderColor, 1.5f });
         writeBuffer.push_command(525, 0, LinePayload{ {boxX + boxW, currentBadgeY}, {boxX + boxW, currentBadgeY + badgeH}, borderColor, 1.5f });
         writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY + badgeH}, {boxX + boxW, currentBadgeY + badgeH}, borderColor, 1.5f });
 
-        // 3. Buff Icon Badge (Depth: 530)
         writeBuffer.push_command(530, 0, RectPayload{
             .dest_rect = { badgeX, currentBadgeY, 30.0f, 30.0f },
             .color = iconColor,
@@ -149,7 +149,6 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
             .is_world_space = false
             });
 
-        // 4. Drop Shadow Text for Readability (Depth: 545)
         TextPayload shadowTxt{
             .position = { centerX + 1.0f, centerY + 1.0f },
             .color = { 0.05f, 0.05f, 0.05f, 0.9f },
@@ -159,7 +158,6 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         std::snprintf(shadowTxt.text_content, sizeof(shadowTxt.text_content), "%s", textStr);
         writeBuffer.push_command(545, 0, shadowTxt);
 
-        // 5. Crisp Foreground Text (Depth: 550)
         TextPayload frontTxt{
             .position = { centerX, centerY },
             .color = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -169,7 +167,6 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
         std::snprintf(frontTxt.text_content, sizeof(frontTxt.text_content), "%s", textStr);
         writeBuffer.push_command(550, 0, frontTxt);
 
-        // Step downward vertically for the next active buff
         currentBadgeY += badgeH + badgeGap;
         };
 

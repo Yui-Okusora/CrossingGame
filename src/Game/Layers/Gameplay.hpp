@@ -21,7 +21,7 @@ private:
     int m_currentLevel = 1;
     int m_maxLevel = MAX_CAMPAIGN_LEVELS;
     int m_currentScore = 0;
-    int m_highestScore = 0; // High score tracker preserved across restarts
+    int m_highestScore = 0;
     float m_elapsedTime = 0.0f;
     bool m_timerStarted = false;
 
@@ -38,14 +38,22 @@ private:
     bool m_isGameOver = false;
     bool m_isLevelComplete = false;
 
-    // Texture Cache
-    TextureHandle m_texSafeZone{};
+    // Terrain Textures
+    TextureHandle m_texGrassStart{};
+    TextureHandle m_texGrassSafePath{};
+    TextureHandle m_texGrassEnd{};
+    TextureHandle m_texLevelUpLine{};
     TextureHandle m_texRoad{};
     TextureHandle m_texElevatorRoad{};
     TextureHandle m_texCodeLine{};
     TextureHandle m_texWater{};
     TextureHandle m_texBusSheet{};
     TextureHandle m_texExamPaper{};
+
+    // Elevator Door Sprites (2 States)
+    TextureHandle m_texElevatorClosed{};
+    TextureHandle m_texElevatorOpened{};
+
     std::vector<TextureHandle> m_codeObstacleTextures;
 
     glm::uvec2 m_waterAtlasDims{ 4, 1 };

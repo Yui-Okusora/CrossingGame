@@ -54,17 +54,12 @@
             Entities/
                 BenchEntity.cpp
                 BenchEntity.hpp
-                BusEntity.cpp
-                BusEntity.hpp
-                CodeStreamEntity.cpp
-                CodeStreamEntity.hpp
                 ElevatorCrowdEntity.cpp
                 ElevatorCrowdEntity.hpp
                 GoalEntity.cpp
                 GoalEntity.hpp
-                LogPlatformEntity.cpp
-                LogPlatformEntity.hpp
                 MovingHazardEntity.hpp
+                StatusEffect.hpp
                 StudentPlayerEntity.cpp
                 StudentPlayerEntity.hpp
                 TeacherNPCEntity.cpp
@@ -155,10 +150,7 @@ add_executable (CrossingGame
   "src/Game/Data/GameStateData.cpp" 
   "src/Game/Entities/GoalEntity.cpp" 
   "src/Game/Entities/BenchEntity.cpp" 
-  "src/Game/Entities/BusEntity.cpp" 
   "src/Game/Entities/ElevatorCrowdEntity.cpp" 
-  "src/Game/Entities/CodeStreamEntity.cpp" 
-  "src/Game/Entities/LogPlatformEntity.cpp" 
   "src/Game/Entities/StudentPlayerEntity.cpp" 
   "src/Game/Entities/TeacherNPCEntity.cpp"
 )
@@ -683,7 +675,19 @@ void Application::run() {
 
         RenderData& renderData = m_ctx.renderBuffer.getReadBuffer();
 
-        m_gl2dRenderer.clearScreen({ 0, 0, 1, 1 }); // Clear frame baseline color
+        // 1. Clear complete screen window with black letterbox color
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // 2. Confine all canvas rendering commands to the 1200x805 scaled viewport
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(
+            static_cast<GLint>(m_ctx.currentViewport.offset.x),
+            static_cast<GLint>(m_ctx.currentViewport.offset.y),
+            static_cast<GLsizei>(scaledCanvas.x),
+            static_cast<GLsizei>(scaledCanvas.y)
+        );
 
         std::sort(renderData.commands.begin(), renderData.commands.end(),
             [](const RenderCommand& a, const RenderCommand& b) noexcept {
@@ -2523,6 +2527,10 @@ void Window::applySettings()
     glfwSetWindowAttrib(m_handle, GLFW_RESIZABLE, m_specs.resizable);
     glfwSetWindowAttrib(m_handle, GLFW_DECORATED, !m_specs.fullscreen);
 
+    if (m_specs.resizable && !m_specs.fullscreen) {
+        glfwSetWindowAspectRatio(m_handle, m_specs.width, m_specs.height);
+    }
+
     glfwSetWindowMonitor(m_handle, m_specs.fullscreen ? glfwGetPrimaryMonitor() : NULL, 100, 100, m_specs.width, m_specs.height, m_specs.fps);
 }
 
@@ -2624,8 +2632,6 @@ void UIContext::update_system_states(EngineContext* ctx) {
     };
 
     ctx->collisionWorld.query_point(virtualMouse, Layer_None, Layer_UI, scratchpad);
-
-    // Pick the top-most registered collider (last element added)
     hot_id = scratchpad.empty() ? 0 : scratchpad.back().targetId;
 
     if (ctx->input.isMouseButtonJustPressed(GLFW_MOUSE_BUTTON_LEFT)) {
@@ -2643,61 +2649,136 @@ void UIContext::update_system_states(EngineContext* ctx) {
 }
 
 bool UIContext::Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, const char* label, float textScale) {
-    // Only register UI colliders if input is enabled for this layer
-    if (input_enabled) {
-        ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
-    }
+    if (input_enabled) ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
 
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
-
     glm::vec4 activeColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } :
         state.hovered ? glm::vec4{ 0.25f, 0.28f, 0.35f, 1.0f } : glm::vec4{ 0.18f, 0.19f, 0.22f, 1.0f };
 
-    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = bounds, .color = activeColor, .no_texture = true });
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = bounds,
+        .color = activeColor,
+        .no_texture = true,
+        .is_world_space = false
+        });
 
     if (label && label[0] != '\0') {
         glm::vec2 centerPoint{ bounds.x + (bounds.z * 0.5f), bounds.y + (bounds.w * 0.5f) };
-        TextPayload txt{ .position = centerPoint, .color = {1, 1, 1, 1}, .scale = textScale, .showInCenter = true };
+        TextPayload txt{
+            .position = centerPoint,
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .scale = textScale,
+            .showInCenter = true
+        };
         snprintf(txt.text_content, sizeof(txt.text_content), "%s", label);
         writeBuffer.push_command(910, 0, txt);
     }
 
-    if (state.clicked) {
-        clicked_id = 0; // Consume click event so lower layers cannot receive it
+    if (state.clicked) clicked_id = 0;
+    return state.clicked;
+}
+
+bool UIContext::TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+    const glm::vec4& bounds, TextureHandle texture, const char* label, float textScale) {
+    return TexturedButton(writeBuffer, ctx, id, bounds, texture, glm::uvec2{ 1, 1 }, label, textScale);
+}
+
+bool UIContext::TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+    const glm::vec4& bounds, TextureHandle texture, glm::uvec2 atlasDims, const char* label, float textScale) {
+    if (input_enabled) ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
+
+    UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
+
+    uint32_t col = (atlasDims.x > 1 && (state.hovered || state.pressed)) ? 1 : 0;
+    glm::vec4 tint = state.pressed ? glm::vec4{ 0.85f, 0.85f, 0.85f, 1.0f } : glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = bounds,
+        .color = tint,
+        .texture = texture,
+        .atlas_dimensions = atlasDims,
+        .atlas_pos = { col, 0 },
+        .no_texture = false,
+        .is_world_space = false
+        });
+
+    if (label && label[0] != '\0') {
+        glm::vec2 centerPoint{ bounds.x + (bounds.z * 0.5f), bounds.y + (bounds.w * 0.5f) };
+        TextPayload txt{
+            .position = centerPoint,
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .scale = textScale,
+            .showInCenter = true
+        };
+        snprintf(txt.text_content, sizeof(txt.text_content), "%s", label);
+        writeBuffer.push_command(910, 0, txt);
     }
 
+    if (state.clicked) clicked_id = 0;
     return state.clicked;
 }
 
 bool UIContext::Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& trackBounds, float& value) {
     if (input_enabled) {
-        ctx->collisionWorld.register_collider(id, trackBounds, Layer_UI);
+        // Expand interactive hitbox vertically for effortless mouse tracking
+        glm::vec4 hitBounds{ trackBounds.x, trackBounds.y - 8.0f, trackBounds.z, trackBounds.w + 16.0f };
+        ctx->collisionWorld.register_collider(id, hitBounds, Layer_UI);
     }
 
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
 
     if (state.pressed) {
-        float relativeX = ctx->input.getMousePosition().x - trackBounds.x;
+        const auto& vp = ctx->currentViewport;
+        glm::vec2 virtualMouse{
+            (ctx->input.getMousePosition().x - vp.offset.x) / vp.scale,
+            (ctx->input.getMousePosition().y - vp.offset.y) / vp.scale
+        };
+        float relativeX = virtualMouse.x - trackBounds.x;
         value = std::clamp(relativeX / trackBounds.z, 0.0f, 1.0f);
     }
 
-    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = trackBounds, .color = {0.06f, 0.06f, 0.08f, 1.0f}, .no_texture = true });
+    // 1. Background Groove
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = trackBounds,
+        .color = { 0.05f, 0.06f, 0.08f, 1.0f },
+        .no_texture = true,
+        .is_world_space = false
+        });
 
-    float knobX = trackBounds.x + (trackBounds.z * value) - 8.0f;
-    float knobY = trackBounds.y + (trackBounds.w * 0.5f) - 15.0f;
-    glm::vec4 knobColor = state.pressed ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } : glm::vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
+    // 2. Active Fill Bar
+    if (value > 0.005f) {
+        writeBuffer.push_command(905, 0, RectPayload{
+            .dest_rect = { trackBounds.x, trackBounds.y, trackBounds.z * value, trackBounds.w },
+            .color = { 0.95f, 0.65f, 0.15f, 1.0f }, // Gold/Orange accent
+            .no_texture = true,
+            .is_world_space = false
+            });
+    }
 
-    writeBuffer.push_command(910, 0, RectPayload{ .dest_rect = {knobX, knobY, 16.0f, 30.0f}, .color = knobColor, .no_texture = true });
+    // 3. Thumb / Knob Indicator
+    float knobWidth = 14.0f;
+    float knobHeight = trackBounds.w + 12.0f;
+    float knobX = trackBounds.x + (trackBounds.z * value) - (knobWidth * 0.5f);
+    float knobY = trackBounds.y - 6.0f;
+
+    glm::vec4 knobColor = state.pressed ? glm::vec4{ 1.0f, 0.85f, 0.3f, 1.0f }
+        : state.hovered ? glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+    : glm::vec4{ 0.82f, 0.85f, 0.9f, 1.0f };
+
+    writeBuffer.push_command(910, 0, RectPayload{
+        .dest_rect = { knobX, knobY, knobWidth, knobHeight },
+        .color = knobColor,
+        .no_texture = true,
+        .is_world_space = false
+        });
+
     return state.pressed;
 }
 
 void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id, const glm::vec4& bounds, std::string& text, uint32_t& cursor, float textScale) {
-    if (input_enabled) {
-        ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
-    }
+    if (input_enabled) ctx->collisionWorld.register_collider(id, bounds, Layer_UI);
 
     UIState state{ is_hot(id), is_active(id), is_clicked(id), is_focused(id) };
-
     static uint32_t lastFocusedId = 0;
     static double nextBackspaceTime = 0.0;
 
@@ -2707,7 +2788,7 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
     }
 
     if (state.focused) {
-        if (text == "Type Here...") { text.clear(); cursor = 0; }
+        if (text == "Student Name" || text == "Type Here...") { text.clear(); cursor = 0; }
         for (uint8_t i = 0; i < ctx->input.unicode_count; ++i) {
             uint32_t cp = ctx->input.unicode_queue[i];
             if (cp >= 32 && cp <= 126 && text.size() < 30) {
@@ -2715,28 +2796,25 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
             }
         }
 
-        constexpr double INITIAL_DELAY = 0.40;
-        constexpr double REPEAT_RATE = 0.04;
-
         if (ctx->input.isKeyJustPressed(GLFW_KEY_BACKSPACE)) {
-            if (cursor > 0) {
-                text.erase(text.begin() + (--cursor));
-            }
-            nextBackspaceTime = ctx->getTime() + INITIAL_DELAY;
+            if (cursor > 0) text.erase(text.begin() + (--cursor));
+            nextBackspaceTime = ctx->getTime() + 0.40;
         }
         else if (ctx->input.isKeyHeld(GLFW_KEY_BACKSPACE)) {
-            double currentTime = ctx->getTime();
-            if (currentTime >= nextBackspaceTime) {
-                if (cursor > 0) {
-                    text.erase(text.begin() + (--cursor));
-                }
-                nextBackspaceTime = currentTime + REPEAT_RATE;
+            if (ctx->getTime() >= nextBackspaceTime) {
+                if (cursor > 0) text.erase(text.begin() + (--cursor));
+                nextBackspaceTime = ctx->getTime() + 0.04;
             }
         }
     }
 
     glm::vec4 borderColor = state.focused ? glm::vec4{ 0.1f, 0.45f, 0.75f, 1.0f } : glm::vec4{ 0.2f, 0.22f, 0.26f, 1.0f };
-    writeBuffer.push_command(900, 0, RectPayload{ .dest_rect = bounds, .color = {0.02f, 0.02f, 0.03f, 1.0f}, .no_texture = true });
+    writeBuffer.push_command(900, 0, RectPayload{
+        .dest_rect = bounds,
+        .color = { 0.02f, 0.02f, 0.03f, 0.9f },
+        .no_texture = true,
+        .is_world_space = false
+        });
     writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y}, {bounds.x + bounds.z, bounds.y}, borderColor, 2.0f });
     writeBuffer.push_command(905, 0, LinePayload{ {bounds.x, bounds.y}, {bounds.x, bounds.y + bounds.w}, borderColor, 2.0f });
     writeBuffer.push_command(905, 0, LinePayload{ {bounds.x + bounds.z, bounds.y}, {bounds.x + bounds.z, bounds.y + bounds.w}, borderColor, 2.0f });
@@ -2745,43 +2823,13 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
     float baselineY = bounds.y + bounds.w - ((bounds.w - textScale) * 0.5f);
     glm::vec2 textPos{ bounds.x + 12.0f, baselineY };
 
-    TextPayload txt{ .position = textPos, .color = {0.95f, 0.95f, 1.0f, 1.0f}, .scale = textScale };
+    TextPayload txt{
+        .position = textPos,
+        .color = { 0.95f, 0.95f, 1.0f, 1.0f },
+        .scale = textScale
+    };
     snprintf(txt.text_content, sizeof(txt.text_content), "%s", text.c_str());
     writeBuffer.push_command(910, 0, txt);
-
-    if (state.focused && ctx->globalFont.packedCharsBuffer) {
-        const auto* packedChars = static_cast<const stbtt_packedchar*>(ctx->globalFont.packedCharsBuffer);
-
-        constexpr float baseBakedFontHeight = 96.0f;
-        float fontScale = textScale / baseBakedFontHeight;
-        constexpr float fontSpacing = 4.0f;
-
-        float cursorOffset = 0.0f;
-        size_t sampleLength = std::min<size_t>(cursor, text.size());
-
-        for (size_t i = 0; i < sampleLength; ++i) {
-            char c = text[i];
-            if (c == ' ') {
-                float spaceAdvance = (ctx->globalFont.spaceSize > 0.0f) ? ctx->globalFont.spaceSize : packedChars[0].xadvance;
-                cursorOffset += (spaceAdvance * fontScale) + fontSpacing;
-            }
-            else if (c >= ' ' && c <= '~') {
-                float advance = packedChars[c - 32].xadvance;
-                cursorOffset += (advance * fontScale) + fontSpacing;
-            }
-        }
-
-        float cursorX = textPos.x + cursorOffset;
-
-        if (static_cast<int>(ctx->getTime() * 4.0) % 2 == 0) {
-            writeBuffer.push_command(920, 0, LinePayload{
-                {cursorX, baselineY + 2.0f},
-                {cursorX, baselineY - textScale + 2.0f},
-                {0.1f, 0.45f, 0.75f, 1.0f},
-                2.0f
-                });
-        }
-    }
 }
 ```
 
@@ -2793,45 +2841,45 @@ void UIContext::TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id
 #include <cstdint>
 #include <string>
 #include <glm/glm.hpp>
+#include "../Graphics/RenderStream.hpp"
 
-// Forward declarations to break circular header dependencies safely
 class EngineContext;
 struct RenderData;
 
-// Lightweight structural data packet returned to interface queries 
 struct UIState {
-    bool hovered = false;  // Cursor is positioned over the component 
-    bool pressed = false;  // Left mouse click is currently held down on the component 
-    bool clicked = false;  // Left mouse click was cleanly released inside the component boundaries this frame 
-    bool focused = false;  // Component currently holds character keyboard typing focus 
+    bool hovered = false;
+    bool pressed = false;
+    bool clicked = false;
+    bool focused = false;
 };
 
 class UIContext {
 public:
-    uint32_t hot_id = 0;     // Primitive component index directly under the pointer 
-    uint32_t active_id = 0;  // Primitive component index targeted by a mouse down event 
-    uint32_t focus_id = 0;   // Primitive component index capturing text input focus 
-    uint32_t clicked_id = 0; // Primitive component index registering a valid action click trigger this frame 
+    uint32_t hot_id = 0;
+    uint32_t active_id = 0;
+    uint32_t focus_id = 0;
+    uint32_t clicked_id = 0;
 
     bool input_enabled = true;
 
-    // Core internal system lifecycles
-    void update_system_states(EngineContext* ctx); 
+    void update_system_states(EngineContext* ctx);
 
-
-    // ============================================================================
-    // DECLARATIVE IMMEDIATE-MODE UI METHODS
-    // ============================================================================
     bool Button(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         const glm::vec4& bounds, const char* label, float textScale = 24.0f);
 
+    bool TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+        const glm::vec4& bounds, TextureHandle texture, const char* label = nullptr, float textScale = 20.0f);
+
+    bool TexturedButton(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
+        const glm::vec4& bounds, TextureHandle texture, glm::uvec2 atlasDims, const char* label = nullptr, float textScale = 20.0f);
+
+    // Clean plain-color slider with responsive track groove, fill, and interactive thumb
     bool Slider(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         const glm::vec4& trackBounds, float& value);
 
     void TextBox(RenderData& writeBuffer, EngineContext* ctx, uint32_t id,
         const glm::vec4& bounds, std::string& text, uint32_t& cursor, float textScale = 24.0f);
 
-    // Inline boolean property access evaluation states 
     [[nodiscard]] inline bool is_hot(uint32_t id) const noexcept { return id != 0 && hot_id == id; }
     [[nodiscard]] inline bool is_active(uint32_t id) const noexcept { return id != 0 && active_id == id; }
     [[nodiscard]] inline bool is_focused(uint32_t id) const noexcept { return id != 0 && focus_id == id; }
@@ -3373,204 +3421,15 @@ public:
 ```
 
 // ==========================================
-// FILE: src\Game\Entities\BusEntity.cpp
-// ==========================================
-```cpp
-#include "BusEntity.hpp"
-
-BusEntity::BusEntity(const glm::vec2& pos, float speed, int dir,
-    const glm::vec2& entitySize,
-    float worldWidth,
-    float offscreenPadding,
-    float visualYOffset,
-    const glm::vec4& color,
-    int32_t renderDepth)
-    : m_visualYOffset(visualYOffset), m_color(color), m_renderDepth(renderDepth) {
-    position = pos;
-    prevPosition = pos;
-    size = entitySize;
-    velocity = glm::vec2(speed * static_cast<float>(dir), 0.0f);
-    layer = CollisionLayer::Layer_Enemy;
-    mask = CollisionLayer::Layer_Player;
-
-    m_minX = -size.x - offscreenPadding;
-    m_maxX = worldWidth + offscreenPadding;
-
-    animator.flipX = (dir < 0);
-}
-
-void BusEntity::onAttach(EngineContext* ctx) {
-    if (!ctx) return;
-
-    // 1. Load the bus spritesheet texture from assets
-    TextureHandle busSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
-
-    // 2. Register driving animation clip (adjust atlasDimensions/frames to match your sheet layout)
-    animator.addAnimation("drive", AnimationClip{
-        .texture = busSheet,
-        .atlasDimensions = { 4, 1 }, // {Columns, Rows}
-        .startFrame = 0,
-        .endFrame = 3,
-        .frameDuration = 0.1f,
-        .loop = true
-        });
-
-    animator.play("drive");
-}
-
-void BusEntity::onUpdate(float dt, EngineContext* ctx) {
-    // 1. Align flip orientation with direction of velocity
-    if (velocity.x != 0.0f) {
-        animator.flipX = (velocity.x < 0.0f);
-        animator.play("drive");
-    }
-
-    // 2. Screen wrapping logic
-    if (velocity.x > 0.0f && position.x > m_maxX) {
-        position.x = m_minX;
-        prevPosition.x = m_minX;
-    }
-    if (velocity.x < 0.0f && position.x < m_minX) {
-        position.x = m_maxX;
-        prevPosition.x = m_maxX;
-    }
-}
-
-void BusEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    // Render current animated frame using Animator2D
-    animator.draw(
-        writeBuffer,
-        ctx,
-        { renderPos.x, renderPos.y + m_visualYOffset },
-        size,
-        m_color,
-        m_renderDepth,
-        true // World space coordinates
-    );
-}
-```
-
-// ==========================================
-// FILE: src\Game\Entities\BusEntity.hpp
-// ==========================================
-```cpp
-#pragma once
-#include <Engine/Engine.hpp>
-
-class BusEntity : public Entity2D {
-private:
-    float m_minX = 0.0f;
-    float m_maxX = 0.0f;
-    float m_visualYOffset = 8.0f;
-    glm::vec4 m_color{ 1.0f, 1.0f, 1.0f, 1.0f };
-    int32_t m_renderDepth = 40;
-
-public:
-    BusEntity(const glm::vec2& pos, float speed, int dir,
-        const glm::vec2& entitySize = { 130.0f, 48.0f },
-        float worldWidth = 1200.0f,
-        float offscreenPadding = 50.0f,
-        float visualYOffset = 8.0f,
-        const glm::vec4& color = { 1.0f, 1.0f, 1.0f, 1.0f },
-        int32_t renderDepth = 40);
-
-    void onAttach(EngineContext* ctx) override;
-    void onUpdate(float dt, EngineContext* ctx) override;
-    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
-};
-```
-
-// ==========================================
-// FILE: src\Game\Entities\CodeStreamEntity.cpp
-// ==========================================
-```cpp
-#include "CodeStreamEntity.hpp"
-
-CodeStreamEntity::CodeStreamEntity(const glm::vec2& pos, float speed, int dir,
-    const glm::vec2& entitySize,
-    float worldWidth,
-    float offscreenPadding,
-    float visualYOffset,
-    const glm::vec4& color,
-    int32_t renderDepth)
-    : m_visualYOffset(visualYOffset), m_color(color), m_renderDepth(renderDepth) {
-    position = pos;
-    prevPosition = pos;
-    size = entitySize;
-    velocity = glm::vec2(speed * static_cast<float>(dir), 0.0f);
-    layer = CollisionLayer::Layer_Enemy;
-    mask = CollisionLayer::Layer_Player;
-
-    m_minX = -size.x - offscreenPadding;
-    m_maxX = worldWidth + offscreenPadding;
-}
-
-void CodeStreamEntity::onUpdate(float dt, EngineContext* ctx) {
-    if (velocity.x > 0.0f && position.x > m_maxX) {
-        position.x = m_minX;
-        prevPosition.x = m_minX;
-    }
-    if (velocity.x < 0.0f && position.x < m_minX) {
-        position.x = m_maxX;
-        prevPosition.x = m_maxX;
-    }
-}
-
-void CodeStreamEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x, renderPos.y + m_visualYOffset, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
-}
-```
-
-// ==========================================
-// FILE: src\Game\Entities\CodeStreamEntity.hpp
-// ==========================================
-```cpp
-#pragma once
-#include <Engine/Engine.hpp>
-
-class CodeStreamEntity : public Entity2D {
-private:
-    float m_minX = 0.0f;
-    float m_maxX = 0.0f;
-    float m_visualYOffset = 12.0f;
-    glm::vec4 m_color{ 0.65f, 0.2f, 0.85f, 1.0f };
-    int32_t m_renderDepth = 40;
-
-public:
-    CodeStreamEntity(const glm::vec2& pos, float speed, int dir,
-        const glm::vec2& entitySize = { 110.0f, 40.0f },
-        float worldWidth = 1200.0f,
-        float offscreenPadding = 50.0f,
-        float visualYOffset = 12.0f,
-        const glm::vec4& color = { 0.65f, 0.2f, 0.85f, 1.0f },
-        int32_t renderDepth = 40);
-
-    void onUpdate(float dt, EngineContext* ctx) override;
-    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
-};
-```
-
-// ==========================================
 // FILE: src\Game\Entities\ElevatorCrowdEntity.cpp
 // ==========================================
 ```cpp
 #include "ElevatorCrowdEntity.hpp"
-#include <algorithm>
 
 ElevatorCrowdEntity::ElevatorCrowdEntity(const glm::vec2& pos, float speed, int dir,
-    const glm::vec2& entitySize,
-    float surgeMultiplier,
-    float worldWidth,
-    float offscreenPadding,
-    float visualYOffset,
-    const glm::vec4& colorYellow,
-    const glm::vec4& colorGreen,
-    int32_t renderDepth)
+    const glm::vec2& entitySize, float surgeMultiplier, float worldWidth,
+    float offscreenPadding, float visualYOffset, const glm::vec4& colorYellow,
+    const glm::vec4& colorGreen, int32_t renderDepth)
     : m_baseSpeed(speed), m_direction(dir), m_surgeMultiplier(surgeMultiplier),
     m_visualYOffset(visualYOffset), m_colorYellow(colorYellow), m_colorGreen(colorGreen),
     m_renderDepth(renderDepth), m_worldWidth(worldWidth) {
@@ -3578,69 +3437,56 @@ ElevatorCrowdEntity::ElevatorCrowdEntity(const glm::vec2& pos, float speed, int 
     layer = CollisionLayer::Layer_Enemy;
     mask = CollisionLayer::Layer_Player;
 
-    // Auto-compute dynamic off-screen bounds
     m_minX = -size.x - offscreenPadding;
     m_maxX = worldWidth + offscreenPadding;
-
-    // Initialize parked off-screen
-    position.x = (m_direction > 0) ? m_minX : m_maxX;
-    position.y = pos.y;
-    prevPosition = position;
+    position = prevPosition = glm::vec2((m_direction > 0) ? m_minX : m_maxX, pos.y);
     velocity = glm::vec2(0.0f);
     m_state = CrowdState::Idle;
 }
 
+void ElevatorCrowdEntity::onAttach(EngineContext* ctx) {
+    if (!ctx) return;
+    TextureHandle crowdTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/WaitingLine.png");
+    animator.addAnimation("rush", AnimationClip{ crowdTex, { 1, 1 }, 0, 0, 1.0f, false });
+    animator.play("rush");
+}
+
 void ElevatorCrowdEntity::setSignal(SignalState signal) {
     currentSignal = signal;
-
-    // 1. Transition to RUSHING when light turns Green (only from Idle)
     if (currentSignal == SignalState::Green && m_state == CrowdState::Idle) {
         m_state = CrowdState::Rushing;
         velocity.x = m_baseSpeed * m_surgeMultiplier * static_cast<float>(m_direction);
+        animator.flipX = (m_direction < 0);
     }
-    // 2. Reset to IDLE when light returns to Red
     else if (currentSignal == SignalState::Red) {
         m_state = CrowdState::Idle;
         velocity = glm::vec2(0.0f);
-        position.x = (m_direction > 0) ? m_minX : m_maxX;
-        prevPosition.x = position.x;
+        position.x = prevPosition.x = (m_direction > 0) ? m_minX : m_maxX;
     }
 }
 
 void ElevatorCrowdEntity::onUpdate(float dt, EngineContext* ctx) {
     if (m_state == CrowdState::Rushing) {
-        // Detect when crowd completely exits the opposite side of the screen
-        if ((m_direction > 0 && position.x > m_maxX) ||
-            (m_direction < 0 && position.x < m_minX)) {
+        if ((m_direction > 0 && position.x > m_maxX) || (m_direction < 0 && position.x < m_minX)) {
             m_state = CrowdState::Finished;
             velocity = glm::vec2(0.0f);
-            position.x = (m_direction > 0) ? m_minX : m_maxX;
-            prevPosition.x = position.x;
+            position.x = prevPosition.x = (m_direction > 0) ? m_minX : m_maxX;
         }
     }
 }
 
 void ElevatorCrowdEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    // Render ONLY while actively rushing across
     if (m_state != CrowdState::Rushing) return;
 
-    glm::vec4 crowdColor = (currentSignal == SignalState::Yellow) ? m_colorYellow : m_colorGreen;
-
-    // Horizontally clip rectangle to visible arena bounds [0.0f, m_worldWidth]
-    float renderLeft = renderPos.x;
-    float renderRight = renderPos.x + size.x;
-
-    float clipLeft = std::clamp(renderLeft, 0.0f, m_worldWidth);
-    float clipRight = std::clamp(renderRight, 0.0f, m_worldWidth);
-
-    if (clipRight > clipLeft) {
-        writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-            .dest_rect = { clipLeft, renderPos.y + m_visualYOffset, clipRight - clipLeft, size.y },
-            .color = crowdColor,
-            .no_texture = true,
-            .is_world_space = true
-            });
-    }
+    // Render full un-compressed sprite quad; OpenGL Scissor handles screen boundaries seamlessly
+    animator.draw(
+        writeBuffer, ctx,
+        { renderPos.x, renderPos.y + m_visualYOffset },
+        size,
+        glm::vec4(1.0f),
+        m_renderDepth,
+        true
+    );
 }
 ```
 
@@ -3689,6 +3535,7 @@ public:
         int32_t renderDepth = 40);
 
     void setSignal(SignalState signal);
+    void onAttach(EngineContext* ctx) override;
     void onUpdate(float dt, EngineContext* ctx) override;
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
 
@@ -3751,82 +3598,6 @@ public:
 ```
 
 // ==========================================
-// FILE: src\Game\Entities\LogPlatformEntity.cpp
-// ==========================================
-```cpp
-#include "LogPlatformEntity.hpp"
-
-LogPlatformEntity::LogPlatformEntity(const glm::vec2& pos, float speed, int dir,
-    const glm::vec2& entitySize,
-    float worldWidth,
-    float offscreenPadding,
-    float visualYOffset,
-    const glm::vec4& color,
-    int32_t renderDepth)
-    : m_visualYOffset(visualYOffset), m_color(color), m_renderDepth(renderDepth) {
-    position = pos;
-    prevPosition = pos;
-    size = entitySize;
-    velocity = glm::vec2(speed * static_cast<float>(dir), 0.0f);
-    layer = CollisionLayer::Layer_TriggerVolume;
-    mask = CollisionLayer::Layer_Player;
-    isTrigger = true;
-
-    m_minX = -size.x - offscreenPadding;
-    m_maxX = worldWidth + offscreenPadding;
-}
-
-void LogPlatformEntity::onUpdate(float dt, EngineContext* ctx) {
-    if (velocity.x > 0.0f && position.x > m_maxX) {
-        position.x = m_minX;
-        prevPosition.x = m_minX;
-    }
-    if (velocity.x < 0.0f && position.x < m_minX) {
-        position.x = m_maxX;
-        prevPosition.x = m_maxX;
-    }
-}
-
-void LogPlatformEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x, renderPos.y + m_visualYOffset, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
-}
-```
-
-// ==========================================
-// FILE: src\Game\Entities\LogPlatformEntity.hpp
-// ==========================================
-```cpp
-#pragma once
-#include <Engine/Engine.hpp>
-
-class LogPlatformEntity : public Entity2D {
-private:
-    float m_minX = 0.0f;
-    float m_maxX = 0.0f;
-    float m_visualYOffset = 7.0f;
-    glm::vec4 m_color{ 0.45f, 0.28f, 0.12f, 1.0f };
-    int32_t m_renderDepth = 25;
-
-public:
-    LogPlatformEntity(const glm::vec2& pos, float speed, int dir,
-        const glm::vec2& entitySize = { 170.0f, 50.0f },
-        float worldWidth = 1200.0f,
-        float offscreenPadding = 50.0f,
-        float visualYOffset = 7.0f,
-        const glm::vec4& color = { 0.45f, 0.28f, 0.12f, 1.0f },
-        int32_t renderDepth = 25);
-
-    void onUpdate(float dt, EngineContext* ctx) override;
-    void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
-};
-```
-
-// ==========================================
 // FILE: src\Game\Entities\MovingHazardEntity.hpp
 // ==========================================
 ```cpp
@@ -3845,10 +3616,9 @@ public:
     MovingHazardEntity(const glm::vec2& pos, float speed, int dir, const glm::vec2& entitySize,
         uint32_t colLayer, uint32_t colMask, bool trigger = false,
         float visualYOffset = 0.0f, const glm::vec4& tint = glm::vec4(1.0f),
-        int32_t renderDepth = 40, float worldWidth = 1200.0f, float padding = 60.0f)
+        int32_t renderDepth = 40, float worldWidth = 1200.0f, float padding = 80.0f)
         : m_visualYOffset(visualYOffset), m_tint(tint), m_renderDepth(renderDepth) {
-        position = pos;
-        prevPosition = pos;
+        position = prevPosition = pos;
         size = entitySize;
         velocity = glm::vec2(speed * static_cast<float>(dir), 0.0f);
         layer = colLayer;
@@ -3866,20 +3636,16 @@ public:
             animator.flipX = (velocity.x < 0.0f);
         }
 
-        // Screen wrapping logic
         if (velocity.x > 0.0f && position.x > m_maxX) {
-            position.x = m_minX;
-            prevPosition.x = m_minX;
+            position.x = prevPosition.x = m_minX;
         }
         else if (velocity.x < 0.0f && position.x < m_minX) {
-            position.x = m_maxX;
-            prevPosition.x = m_maxX;
+            position.x = prevPosition.x = m_maxX;
         }
     }
 
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override {
         if (animator.getCurrentAnimationName().empty()) {
-            // Fallback solid color quad if no sprite animation is attached
             writeBuffer.push_command(m_renderDepth, 0, RectPayload{
                 .dest_rect = { renderPos.x, renderPos.y + m_visualYOffset, size.x, size.y },
                 .color = m_tint,
@@ -3895,19 +3661,190 @@ public:
 ```
 
 // ==========================================
+// FILE: src\Game\Entities\StatusEffect.hpp
+// ==========================================
+```cpp
+#pragma once
+#include <Engine/Engine.hpp>
+#include <memory>
+#include <vector>
+#include <algorithm>
+
+class StudentPlayerEntity;
+
+enum class TeacherBuffType : uint8_t {
+    SpeedBoost,
+    DeadlineShield,
+    GpaMultiplier,
+    Invincibility
+};
+
+class IStatusEffect {
+public:
+    virtual ~IStatusEffect() = default;
+    virtual void onApply(StudentPlayerEntity* player) {}
+    virtual void onUpdate(float dt, StudentPlayerEntity* player) = 0;
+    virtual void onRemove(StudentPlayerEntity* player) {}
+    virtual bool onTakeDamage(StudentPlayerEntity* player) { return false; }
+    [[nodiscard]] virtual bool isExpired() const noexcept = 0;
+    [[nodiscard]] virtual TeacherBuffType getType() const noexcept = 0;
+    [[nodiscard]] virtual float getRemainingTime() const noexcept { return 0.0f; }
+};
+
+// --- CONCRETE STATUS EFFECTS ---
+class SpeedBoostEffect : public IStatusEffect {
+private:
+    float m_duration = 10.0f;
+public:
+    void onApply(StudentPlayerEntity* player) override;
+    void onUpdate(float dt, StudentPlayerEntity* player) override { m_duration -= dt; }
+    void onRemove(StudentPlayerEntity* player) override;
+    [[nodiscard]] bool isExpired() const noexcept override { return m_duration <= 0.0f; }
+    [[nodiscard]] TeacherBuffType getType() const noexcept override { return TeacherBuffType::SpeedBoost; }
+    [[nodiscard]] float getRemainingTime() const noexcept override { return (std::max)(0.0f, m_duration); }
+};
+
+class GpaMultiplierEffect : public IStatusEffect {
+private:
+    float m_duration = 12.0f;
+public:
+    void onApply(StudentPlayerEntity* player) override;
+    void onUpdate(float dt, StudentPlayerEntity* player) override { m_duration -= dt; }
+    void onRemove(StudentPlayerEntity* player) override;
+    [[nodiscard]] bool isExpired() const noexcept override { return m_duration <= 0.0f; }
+    [[nodiscard]] TeacherBuffType getType() const noexcept override { return TeacherBuffType::GpaMultiplier; }
+    [[nodiscard]] float getRemainingTime() const noexcept override { return (std::max)(0.0f, m_duration); }
+};
+
+class InvincibilityEffect : public IStatusEffect {
+private:
+    float m_duration = 2.0f;
+public:
+    explicit InvincibilityEffect(float duration = 2.0f) : m_duration(duration) {}
+    void onUpdate(float dt, StudentPlayerEntity* player) override { m_duration -= dt; }
+    bool onTakeDamage(StudentPlayerEntity* player) override { return true; } // Completely blocks damage
+    [[nodiscard]] bool isExpired() const noexcept override { return m_duration <= 0.0f; }
+    [[nodiscard]] TeacherBuffType getType() const noexcept override { return TeacherBuffType::Invincibility; }
+    [[nodiscard]] float getRemainingTime() const noexcept override { return (std::max)(0.0f, m_duration); }
+};
+
+class DeadlineShieldEffect : public IStatusEffect {
+private:
+    bool m_consumed = false;
+public:
+    void onUpdate(float dt, StudentPlayerEntity* player) override {}
+    bool onTakeDamage(StudentPlayerEntity* player) override {
+        if (!m_consumed) {
+            m_consumed = true; // Shield absorbs the lethal hit
+            return true;
+        }
+        return false;
+    }
+    void onRemove(StudentPlayerEntity* player) override; // Defined in StudentPlayerEntity.cpp to grant invincibility
+    [[nodiscard]] bool isExpired() const noexcept override { return m_consumed; }
+    [[nodiscard]] TeacherBuffType getType() const noexcept override { return TeacherBuffType::DeadlineShield; }
+};
+
+// --- COMPOSITE CONTAINER (COEXISTING BUFFS) ---
+class StatusEffectComposite : public IStatusEffect {
+private:
+    std::vector<std::unique_ptr<IStatusEffect>> m_effects;
+
+public:
+    void addEffect(std::unique_ptr<IStatusEffect> effect, StudentPlayerEntity* player) {
+        // Refresh only the effect of the exact same type; all different buffs coexist together
+        auto it = std::find_if(m_effects.begin(), m_effects.end(),
+            [&](const auto& e) { return e->getType() == effect->getType(); });
+
+        if (it != m_effects.end()) {
+            (*it)->onRemove(player);
+            m_effects.erase(it);
+        }
+
+        effect->onApply(player);
+        m_effects.push_back(std::move(effect));
+    }
+
+    void onUpdate(float dt, StudentPlayerEntity* player) override {
+        for (auto& effect : m_effects) {
+            effect->onUpdate(dt, player);
+        }
+        cleanupExpired(player);
+    }
+
+    bool onTakeDamage(StudentPlayerEntity* player) override {
+        for (auto& effect : m_effects) {
+            if (effect->onTakeDamage(player)) {
+                cleanupExpired(player);
+                return true; // Damage successfully mitigated
+            }
+        }
+        return false;
+    }
+
+    void cleanupExpired(StudentPlayerEntity* player) {
+        for (auto& effect : m_effects) {
+            if (effect->isExpired()) {
+                effect->onRemove(player);
+            }
+        }
+        std::erase_if(m_effects, [](const auto& e) { return e->isExpired(); });
+    }
+
+    void syncBlackboard(EngineContext* ctx) const {
+        if (!ctx) return;
+        ctx->blackboard.set("buffShield", hasEffect(TeacherBuffType::DeadlineShield));
+        ctx->blackboard.set("buffSpeedTimer", getRemainingTime(TeacherBuffType::SpeedBoost));
+        ctx->blackboard.set("buffGpaTimer", getRemainingTime(TeacherBuffType::GpaMultiplier));
+        ctx->blackboard.set("buffInvincibleTimer", getRemainingTime(TeacherBuffType::Invincibility));
+    }
+
+    [[nodiscard]] bool isExpired() const noexcept override { return false; }
+    [[nodiscard]] TeacherBuffType getType() const noexcept override { return TeacherBuffType::SpeedBoost; }
+
+    [[nodiscard]] bool hasEffect(TeacherBuffType type) const noexcept {
+        return std::any_of(m_effects.begin(), m_effects.end(),
+            [type](const auto& e) { return e->getType() == type; });
+    }
+
+    [[nodiscard]] float getRemainingTime(TeacherBuffType type) const noexcept {
+        for (const auto& e : m_effects) {
+            if (e->getType() == type) return e->getRemainingTime();
+        }
+        return 0.0f;
+    }
+
+    void clear(StudentPlayerEntity* player) {
+        for (auto& e : m_effects) e->onRemove(player);
+        m_effects.clear();
+    }
+};
+```
+
+// ==========================================
 // FILE: src\Game\Entities\StudentPlayerEntity.cpp
 // ==========================================
 ```cpp
 #include "StudentPlayerEntity.hpp"
 #include "../Layers/Gameplay.hpp"
-#include <iostream>
 #include <algorithm>
 #include <cmath>
+
+void SpeedBoostEffect::onApply(StudentPlayerEntity* player) { player->setSpeedModifier(38.0f); }
+void SpeedBoostEffect::onRemove(StudentPlayerEntity* player) { player->setSpeedModifier(22.0f); }
+void GpaMultiplierEffect::onApply(StudentPlayerEntity* player) { player->setScoreMultiplier(2); }
+void GpaMultiplierEffect::onRemove(StudentPlayerEntity* player) { player->setScoreMultiplier(1); }
+
+void DeadlineShieldEffect::onRemove(StudentPlayerEntity* player) {
+    if (m_consumed) {
+        player->applyBuff(TeacherBuffType::Invincibility);
+    }
+}
 
 StudentPlayerEntity::StudentPlayerEntity(const glm::vec2& startPos, GameplayLayer* layerPtr, const PlayerConfig& config)
     : m_gameplayLayer(layerPtr), m_config(config) {
     position = prevPosition = m_targetPosition = startPos;
-    size = m_config.entitySize;
+    size = m_config.hitboxSize;
     layer = CollisionLayer::Layer_Player;
     mask = CollisionLayer::Layer_Enemy | CollisionLayer::Layer_Obstacle | CollisionLayer::Layer_TriggerVolume;
     isStatic = false;
@@ -3916,59 +3853,107 @@ StudentPlayerEntity::StudentPlayerEntity(const glm::vec2& startPos, GameplayLaye
 void StudentPlayerEntity::onAttach(EngineContext* ctx) {
     if (!ctx) return;
     TextureHandle catSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/MainChar/Cat character rework - animation.png");
-    animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 0, 1, 0.35f, true });
-    animator.addAnimation("hop", AnimationClip{ catSheet, { 6, 4 }, 6, 11, 0.06f, true });
+
+    // Row 0: Down Movement (6 frames: 0 - 5)
+    animator.addAnimation("hop_down", AnimationClip{ catSheet, { 6, 4 }, 0, 5, 0.06f, true });
+
+    // Row 1: Up Movement (6 frames: 6 - 11)
+    animator.addAnimation("hop_up", AnimationClip{ catSheet, { 6, 4 }, 6, 11, 0.06f, true });
+
+    // Row 2: Side Movement (6 frames: 12 - 17, flipX handles Left)
+    animator.addAnimation("hop_side", AnimationClip{ catSheet, { 6, 4 }, 12, 17, 0.06f, true });
+
+    // Row 3: Universal Idle (4 frames: 18 - 21)
+    animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 18, 21, 0.28f, true });
+
+    playIdleAnimation();
+}
+
+void StudentPlayerEntity::playHopAnimation() {
+    switch (m_facing) {
+    case PlayerDirection::Down:
+        animator.flipX = false;
+        animator.play("hop_down");
+        break;
+    case PlayerDirection::Up:
+        animator.flipX = false;
+        animator.play("hop_up");
+        break;
+    case PlayerDirection::Right:
+        animator.flipX = false;
+        animator.play("hop_side");
+        break;
+    case PlayerDirection::Left:
+        animator.flipX = true;
+        animator.play("hop_side");
+        break;
+    }
+}
+
+void StudentPlayerEntity::playIdleAnimation() {
+    animator.flipX = false;
     animator.play("idle");
 }
 
 void StudentPlayerEntity::applyBuff(TeacherBuffType buffType) {
     switch (buffType) {
     case TeacherBuffType::SpeedBoost:
-        m_speedBoostTimer = 10.0f;
-        m_config.lerpSpeed = 38.0f;
+        m_buffs.addEffect(std::make_unique<SpeedBoostEffect>(), this);
         break;
     case TeacherBuffType::DeadlineShield:
-        m_hasShield = true;
+        m_buffs.addEffect(std::make_unique<DeadlineShieldEffect>(), this);
         break;
     case TeacherBuffType::GpaMultiplier:
-        m_scoreMultiplier = 2;
-        m_gpaMultiplierTimer = 12.0f;
+        m_buffs.addEffect(std::make_unique<GpaMultiplierEffect>(), this);
+        break;
+    case TeacherBuffType::Invincibility:
+        m_buffs.addEffect(std::make_unique<InvincibilityEffect>(2.0f), this);
         break;
     }
+}
+
+bool StudentPlayerEntity::handleLethalDamage(EngineContext* ctx, const glm::vec2& rescuePos) {
+    if (m_buffs.onTakeDamage(this)) {
+        if (rescuePos != glm::vec2(0.0f, 0.0f)) {
+            position = m_targetPosition = rescuePos;
+        }
+        return false;
+    }
+
+    m_isDead = true;
+    if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
+    return true;
 }
 
 void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
     if (m_isDead) return;
     m_touchingLogThisFrame = false;
+    m_auraAnimTimer += dt;
 
-    if (m_speedBoostTimer > 0.0f && (m_speedBoostTimer -= dt) <= 0.0f) {
-        m_speedBoostTimer = 0.0f;
-        m_config.lerpSpeed = 22.0f;
-    }
-    if (m_gpaMultiplierTimer > 0.0f && (m_gpaMultiplierTimer -= dt) <= 0.0f) {
-        m_gpaMultiplierTimer = 0.0f;
-        m_scoreMultiplier = 1;
-    }
-    if (m_invincibilityTimer > 0.0f && (m_invincibilityTimer -= dt) <= 0.0f) {
-        m_invincibilityTimer = 0.0f;
-    }
-
-    if (ctx) {
-        ctx->blackboard.set("buffShield", m_hasShield);
-        ctx->blackboard.set("buffSpeedTimer", m_speedBoostTimer);
-        ctx->blackboard.set("buffGpaTimer", m_gpaMultiplierTimer);
-        ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
-    }
+    m_buffs.onUpdate(dt, this);
+    m_buffs.syncBlackboard(ctx);
 
     glm::vec2 freshDir{ 0.0f, 0.0f };
-    if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP))    freshDir.y -= m_config.gridSize;
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN))  freshDir.y += m_config.gridSize;
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT))  freshDir.x -= m_config.gridSize;
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) freshDir.x += m_config.gridSize;
+    if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP)) {
+        freshDir.y -= m_config.gridSize;
+        m_facing = PlayerDirection::Up;
+    }
+    else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN)) {
+        freshDir.y += m_config.gridSize;
+        m_facing = PlayerDirection::Down;
+    }
+    else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT)) {
+        freshDir.x -= m_config.gridSize;
+        m_facing = PlayerDirection::Left;
+    }
+    else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) {
+        freshDir.x += m_config.gridSize;
+        m_facing = PlayerDirection::Right;
+    }
 
     if (freshDir != glm::vec2(0.0f, 0.0f)) {
         m_inputBuffer = freshDir;
-        m_bufferTimer = INPUT_BUFFER_DURATION;
+        m_bufferTimer = 0.18f;
     }
     else if (m_bufferTimer > 0.0f && (m_bufferTimer -= dt) <= 0.0f) {
         m_inputBuffer = glm::vec2(0.0f, 0.0f);
@@ -3976,13 +3961,6 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
 
     if (!m_isMoving) {
         glm::vec2 dir = m_inputBuffer;
-        if (dir == glm::vec2(0.0f, 0.0f)) {
-            if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP))    dir.y -= m_config.gridSize;
-            else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN))  dir.y += m_config.gridSize;
-            else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT))  dir.x -= m_config.gridSize;
-            else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) dir.x += m_config.gridSize;
-        }
-
         if (dir != glm::vec2(0.0f, 0.0f)) {
             glm::vec2 nextTarget = m_targetPosition + dir;
             nextTarget.x = std::clamp(nextTarget.x, m_config.minX, m_config.maxX);
@@ -3991,7 +3969,8 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
             if (nextTarget != position) {
                 m_targetPosition = nextTarget;
                 m_isMoving = true;
-                m_hasStartedFirstMove = true; // Signal first move initiated
+                m_hasStartedFirstMove = true;
+                playHopAnimation();
             }
             m_inputBuffer = glm::vec2(0.0f, 0.0f);
             m_bufferTimer = 0.0f;
@@ -3999,13 +3978,12 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
     }
 
     if (m_isMoving) {
-        animator.play("hop");
-        float factor = 1.0f - std::exp(-m_config.lerpSpeed * dt);
+        float factor = 1.0f - std::exp(-m_config.currentLerpSpeed * dt);
         position = glm::mix(position, m_targetPosition, factor);
         if (glm::distance(position, m_targetPosition) < 0.5f) {
             position = m_targetPosition;
             m_isMoving = false;
-            animator.play("idle");
+            playIdleAnimation();
         }
     }
 }
@@ -4014,26 +3992,13 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
     if (m_isDead) return;
 
     if ((collision.targetLayer & CollisionLayer::Layer_Enemy) != 0) {
-        if (m_invincibilityTimer > 0.0f) return;
-
-        if (m_hasShield) {
-            m_hasShield = false;
-            m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
-            if (ctx) {
-                ctx->blackboard.set("buffShield", false);
-                ctx->blackboard.set("buffInvincibleTimer", m_invincibilityTimer);
-            }
-        }
-        else {
-            m_isDead = true;
-            if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
-        }
+        handleLethalDamage(ctx);
     }
     else if ((collision.targetLayer & CollisionLayer::Layer_Obstacle) != 0) {
-        position = prevPosition;
-        m_targetPosition = prevPosition;
+        position = m_targetPosition = prevPosition;
         m_isMoving = false;
         m_inputBuffer = glm::vec2(0.0f, 0.0f);
+        playIdleAnimation();
     }
     else if ((collision.targetLayer & CollisionLayer::Layer_TriggerVolume) != 0) {
         m_touchingLogThisFrame = true;
@@ -4041,63 +4006,51 @@ void StudentPlayerEntity::onCollision(const CollisionInfo& collision, EngineCont
 }
 
 void StudentPlayerEntity::postPhysicsUpdate(float dt, EngineContext* ctx) {
-    if (m_isDead) return;
+    if (m_isDead || m_isMoving) return;
 
-    if (!m_isMoving) {
-        if (m_touchingLogThisFrame) {
-            position.x += currentWaterVel.x * dt;
-            m_targetPosition.x = position.x;
+    if (m_touchingLogThisFrame) {
+        position.x += currentWaterVel.x * dt;
+        m_targetPosition.x = position.x;
 
-            if (position.x < m_config.minX - 20.0f || position.x > m_config.maxX + 20.0f) {
-                if (m_invincibilityTimer <= 0.0f) {
-                    if (m_hasShield) {
-                        m_hasShield = false;
-                        m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
-                        position.x = m_targetPosition.x = 576.0f;
-                    }
-                    else {
-                        m_isDead = true;
-                        if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
-                    }
-                }
-            }
+        if (position.x < m_config.minX - 20.0f || position.x > m_config.maxX + 20.0f) {
+            handleLethalDamage(ctx, { 576.0f, position.y });
         }
-        else if (isOnWaterLane) {
-            if (m_invincibilityTimer <= 0.0f) {
-                if (m_hasShield) {
-                    m_hasShield = false;
-                    m_invincibilityTimer = SHIELD_INVINCIBILITY_DURATION;
-                }
-                else {
-                    m_isDead = true;
-                    if (m_gameplayLayer) m_gameplayLayer->triggerGameOver(ctx);
-                }
-            }
-        }
+    }
+    else if (isOnWaterLane) {
+        handleLethalDamage(ctx);
     }
 }
 
 void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    animator.draw(writeBuffer, ctx, renderPos + m_config.visualOffset, size, glm::vec4(1.0f), m_config.renderDepth, true);
+    bool hasSpeed = m_buffs.hasEffect(TeacherBuffType::SpeedBoost);
+    bool hasGpa = m_buffs.hasEffect(TeacherBuffType::GpaMultiplier);
+    bool hasShield = m_buffs.hasEffect(TeacherBuffType::DeadlineShield);
+    bool hasInvincible = m_buffs.hasEffect(TeacherBuffType::Invincibility);
 
-    if (m_invincibilityTimer > 0.0f) {
-        if (static_cast<int>(m_invincibilityTimer * 12.0f) % 2 == 0) {
-            writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
-                .dest_rect = { renderPos.x + 2.0f, renderPos.y + 2.0f, size.x + 16.0f, size.y + 16.0f },
-                .color = { 0.2f, 0.9f, 1.0f, 0.6f },
-                .no_texture = true,
-                .is_world_space = true
-                });
-        }
-    }
-    else if (m_hasShield) {
-        writeBuffer.push_command(m_config.renderDepth + 1, 0, RectPayload{
-            .dest_rect = { renderPos.x + 4.0f, renderPos.y + 4.0f, size.x + 12.0f, size.y + 12.0f },
-            .color = { 1.0f, 0.85f, 0.1f, 0.45f },
+    if (hasSpeed || hasGpa || hasShield || hasInvincible) {
+        float pulse = 0.5f + 0.5f * std::sin(m_auraAnimTimer * 8.0f);
+        glm::vec4 auraColor = hasInvincible ? glm::vec4{ 0.2f, 0.9f, 1.0f, 0.45f + 0.25f * pulse }
+            : hasShield ? glm::vec4{ 1.0f, 0.85f, 0.2f, 0.40f + 0.20f * pulse }
+            : hasGpa ? glm::vec4{ 0.85f, 0.2f, 0.95f, 0.40f + 0.20f * pulse }
+        : glm::vec4{ 0.2f, 0.95f, 0.4f, 0.40f + 0.20f * pulse };
+
+        writeBuffer.push_command(m_config.renderDepth - 1, 0, RectPayload{
+            .dest_rect = { renderPos.x - 8.0f, renderPos.y - 8.0f, size.x + 16.0f, size.y + 16.0f },
+            .color = auraColor,
             .no_texture = true,
             .is_world_space = true
             });
     }
+
+    animator.draw(
+        writeBuffer,
+        ctx,
+        renderPos - m_config.spriteOffset,
+        m_config.spriteRenderSize,
+        glm::vec4(1.0f),
+        m_config.renderDepth,
+        true
+    );
 }
 ```
 
@@ -4107,19 +4060,27 @@ void StudentPlayerEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, 
 ```cpp
 #pragma once
 #include <Engine/Engine.hpp>
-#include "TeacherNPCEntity.hpp"
+#include "StatusEffect.hpp"
 
 class GameplayLayer;
 
+enum class PlayerDirection : uint8_t {
+    Down,
+    Up,
+    Left,
+    Right
+};
+
 struct PlayerConfig {
-    glm::vec2 entitySize{ 44.0f, 44.0f };
+    glm::vec2 hitboxSize{ 28.0f, 36.0f };
+    glm::vec2 spriteRenderSize{ 64.0f, 64.0f };
+    glm::vec2 spriteOffset{ 18.0f, 14.0f };
     float gridSize = 64.0f;
-    float lerpSpeed = 22.0f;
+    float defaultLerpSpeed = 22.0f;
+    float currentLerpSpeed = 22.0f;
     float minX = 0.0f;
     float maxX = 1152.0f;
-    float maxY = 700.0f;
-    glm::vec2 visualOffset{ 10.0f, 10.0f };
-    glm::vec4 color{ 0.0f, 0.85f, 1.0f, 1.0f };
+    float maxY = 741.0f;
     int32_t renderDepth = 50;
 };
 
@@ -4127,24 +4088,22 @@ class StudentPlayerEntity : public Entity2D {
 private:
     GameplayLayer* m_gameplayLayer = nullptr;
     PlayerConfig m_config;
+    StatusEffectComposite m_buffs;
 
+    PlayerDirection m_facing = PlayerDirection::Up;
     glm::vec2 m_targetPosition{ 0.0f, 0.0f };
     bool m_isMoving = false;
-    bool m_hasStartedFirstMove = false; // Tracks first player movement
+    bool m_hasStartedFirstMove = false;
+    bool m_isDead = false;
+    bool m_touchingLogThisFrame = false;
 
     glm::vec2 m_inputBuffer{ 0.0f, 0.0f };
     float m_bufferTimer = 0.0f;
-    static constexpr float INPUT_BUFFER_DURATION = 0.18f;
-
-    bool m_touchingLogThisFrame = false;
-    bool m_isDead = false;
-
-    bool m_hasShield = false;
-    float m_speedBoostTimer = 0.0f;
-    float m_gpaMultiplierTimer = 0.0f;
-    float m_invincibilityTimer = 0.0f;
     int m_scoreMultiplier = 1;
-    static constexpr float SHIELD_INVINCIBILITY_DURATION = 2.0f;
+    float m_auraAnimTimer = 0.0f;
+
+    void playHopAnimation();
+    void playIdleAnimation();
 
 public:
     bool isOnWaterLane = false;
@@ -4153,17 +4112,20 @@ public:
     StudentPlayerEntity(const glm::vec2& startPos, GameplayLayer* layerPtr, const PlayerConfig& config = PlayerConfig{});
 
     void onAttach(EngineContext* ctx) override;
-    [[nodiscard]] bool isMoving() const noexcept { return m_isMoving; }
-    [[nodiscard]] bool hasStartedFirstMove() const noexcept { return m_hasStartedFirstMove; }
-    [[nodiscard]] bool hasShield() const noexcept { return m_hasShield; }
-    [[nodiscard]] bool isInvincible() const noexcept { return m_invincibilityTimer > 0.0f; }
-    [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
-
     void applyBuff(TeacherBuffType buffType);
+
+    void setSpeedModifier(float speed) noexcept { m_config.currentLerpSpeed = speed; }
+    void setScoreMultiplier(int mult) noexcept { m_scoreMultiplier = mult; }
+    [[nodiscard]] int getScoreMultiplier() const noexcept { return m_scoreMultiplier; }
+    [[nodiscard]] bool hasStartedFirstMove() const noexcept { return m_hasStartedFirstMove; }
+    [[nodiscard]] bool isDead() const noexcept { return m_isDead; }
+
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;
     void postPhysicsUpdate(float dt, EngineContext* ctx);
     void onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) override;
+
+    bool handleLethalDamage(EngineContext* ctx, const glm::vec2& rescuePos = { 0.0f, 0.0f });
 };
 ```
 
@@ -4174,21 +4136,12 @@ public:
 #include "TeacherNPCEntity.hpp"
 #include "StudentPlayerEntity.hpp"
 #include <iostream>
-#include <cmath>
 
 TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrolB, TeacherBuffType buff)
     : m_buffType(buff) {
-    position = pos;
-    prevPosition = pos;
-    m_patrolA = pos;
+    position = prevPosition = m_patrolA = pos;
     m_patrolB = patrolB;
     size = glm::vec2(44.0f, 44.0f);
-
-    switch (m_buffType) {
-    case TeacherBuffType::SpeedBoost:     m_color = glm::vec4{ 0.2f, 0.85f, 0.3f, 1.0f }; break;
-    case TeacherBuffType::DeadlineShield: m_color = glm::vec4{ 0.9f, 0.75f, 0.1f, 1.0f }; break;
-    case TeacherBuffType::GpaMultiplier:  m_color = glm::vec4{ 0.85f, 0.2f, 0.95f, 1.0f }; break;
-    }
 
     layer = CollisionLayer::Layer_TriggerVolume;
     mask = CollisionLayer::Layer_Player;
@@ -4197,9 +4150,16 @@ TeacherNPCEntity::TeacherNPCEntity(const glm::vec2& pos, const glm::vec2& patrol
 }
 
 void TeacherNPCEntity::onAttach(EngineContext* ctx) {
-    if (ctx) {
-        m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "buff_pickup.wav");
-    }
+    if (!ctx) return;
+    m_buffSFX = ctx->audioEngine.loadSound(SFX_PATH "buff_pickup.wav");
+
+    const char* sheetPath = (m_buffType == TeacherBuffType::GpaMultiplier)
+        ? RESOURCES_PATH "Sprite/Teacher/Teacher Tinh - animation.png"
+        : RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png";
+
+    TextureHandle teacherSheet = ctx->assetManager.loadTexture(sheetPath);
+    animator.addAnimation("patrol", AnimationClip{ teacherSheet, { 6, 4 }, 0, 5, 0.14f, true });
+    animator.play("patrol");
 }
 
 void TeacherNPCEntity::onUpdate(float dt, EngineContext* ctx) {
@@ -4216,10 +4176,8 @@ void TeacherNPCEntity::onUpdate(float dt, EngineContext* ctx) {
     else {
         velocity = glm::normalize(dir) * m_moveSpeed;
     }
-}
 
-void TeacherNPCEntity::onCollision(const CollisionInfo& collision, EngineContext* ctx) {
-    onTrigger(collision, ctx);
+    animator.flipX = (velocity.x < 0.0f);
 }
 
 void TeacherNPCEntity::onTrigger(const CollisionInfo& trigger, EngineContext* ctx) {
@@ -4227,30 +4185,20 @@ void TeacherNPCEntity::onTrigger(const CollisionInfo& trigger, EngineContext* ct
 
     if ((trigger.targetLayer & CollisionLayer::Layer_Player) != 0) {
         m_isBuffGiven = true;
-        active = false; // Disappear from arena upon pickup
+        active = false;
 
-        // --- FIX: Apply buff to player on collision ---
-        if (m_player) {
-            m_player->applyBuff(m_buffType);
-        }
-
-        if (ctx) {
-            ctx->audioEngine.play(m_buffSFX, AudioCategory::GameplaySFX);
-        }
-
-        std::cout << "[TeacherNPC] Granted Buff to Player: " << static_cast<int>(m_buffType) << "\n";
+        if (m_player) m_player->applyBuff(m_buffType);
+        if (ctx) ctx->audioEngine.play(m_buffSFX, AudioCategory::GameplaySFX);
     }
+}
+
+void TeacherNPCEntity::onCollision(const CollisionInfo& collision, EngineContext* ctx) {
+    onTrigger(collision, ctx);
 }
 
 void TeacherNPCEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
     if (m_isBuffGiven) return;
-
-    writeBuffer.push_command(m_renderDepth, 0, RectPayload{
-        .dest_rect = { renderPos.x + 10.0f, renderPos.y + 10.0f, size.x, size.y },
-        .color = m_color,
-        .no_texture = true,
-        .is_world_space = true
-        });
+    animator.draw(writeBuffer, ctx, { renderPos.x + 10.0f, renderPos.y + 10.0f }, size, glm::vec4(1.0f), m_renderDepth, true);
 }
 ```
 
@@ -4260,18 +4208,13 @@ void TeacherNPCEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, con
 ```cpp
 #pragma once
 #include <Engine/Engine.hpp>
+#include "StatusEffect.hpp"
 
-class StudentPlayerEntity; // Forward declaration
-
-enum class TeacherBuffType : uint8_t {
-    SpeedBoost,
-    DeadlineShield,
-    GpaMultiplier
-};
+class StudentPlayerEntity;
 
 class TeacherNPCEntity : public Entity2D {
 private:
-    StudentPlayerEntity* m_player = nullptr; // <--- Add player pointer
+    StudentPlayerEntity* m_player = nullptr;
     TeacherBuffType m_buffType = TeacherBuffType::SpeedBoost;
     glm::vec2 m_patrolA{ 0.0f, 0.0f };
     glm::vec2 m_patrolB{ 0.0f, 0.0f };
@@ -4288,9 +4231,9 @@ public:
         const glm::vec2& patrolB,
         TeacherBuffType buff = TeacherBuffType::SpeedBoost);
 
-    void setPlayer(StudentPlayerEntity* player) noexcept { m_player = player; } // <--- Setter
+    void setPlayer(StudentPlayerEntity* player) noexcept { m_player = player; }
 
-    void onAttach(EngineContext* ctx);
+    void onAttach(EngineContext* ctx) override;
     void onUpdate(float dt, EngineContext* ctx) override;
     void onCollision(const CollisionInfo& collision, EngineContext* ctx) override;
     void onTrigger(const CollisionInfo& trigger, EngineContext* ctx) override;
@@ -4308,9 +4251,11 @@ public:
 #pragma once
 #include <cstdint>
 
+inline constexpr int MAX_CAMPAIGN_LEVELS = 10;
+
 enum class GameMode : uint8_t {
-    Campaign, // 5 fixed levels with time bonus speed-runs
-    Endless   // Infinite waves with dynamic scaling speed and time-survived scoring
+    Campaign,
+    Endless
 };
 
 enum UIWidgetID : uint32_t {
@@ -4336,6 +4281,7 @@ enum UIWidgetID : uint32_t {
     ID_LOAD_Back = 4020,
 
     ID_PAUSE_Resume = 5001,
+    ID_PAUSE_Restart,
     ID_PAUSE_Save,
     ID_PAUSE_Settings,
     ID_PAUSE_MainMenu,
@@ -4363,26 +4309,60 @@ enum UIWidgetID : uint32_t {
 #include "WinLoseLayer.hpp"
 #include "PauseMenu.hpp"
 #include <random>
-#include <cmath>
-#include <numeric>
+#include <chrono>
 #include <algorithm>
+#include <numeric>
+
+void GameplayLayer::updateScore(int newScore, EngineContext* ctx) {
+    m_currentScore = newScore;
+    ctx->blackboard.set("currentScore", m_currentScore);
+
+    if (m_currentScore > m_highestScore) {
+        m_highestScore = m_currentScore;
+        ctx->blackboard.set("highestScore", m_highestScore);
+    }
+}
 
 void GameplayLayer::onAttach(EngineContext* ctx) {
     if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) m_playerName = *nameOpt;
     if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
     if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
+    // Retrieve persistent high score from blackboard
+    if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) {
+        m_highestScore = *highScoreOpt;
+    }
+    else {
+        m_highestScore = 0;
+        ctx->blackboard.set("highestScore", m_highestScore);
+    }
+
+    m_maxLevel = MAX_CAMPAIGN_LEVELS;
     m_currentScore = 0;
     m_elapsedTime = 0.0f;
     m_timerStarted = false;
+
     ctx->blackboard.set("currentScore", m_currentScore);
     ctx->blackboard.set("elapsedTime", m_elapsedTime);
+    ctx->blackboard.set("currentLevel", m_currentLevel);
+    ctx->blackboard.set("maxLevel", m_maxLevel);
 
     m_texSafeZone = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/grassSafePath.png");
     m_texRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Road/Road.png");
     m_texElevatorRoad = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Elevator/ElevatorRoad.png");
     m_texCodeLine = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine.png");
     m_texWater = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/River/River.png");
+    m_texBusSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
+    m_texExamPaper = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/ExamPaper/ExamPaper.png");
+
+    m_codeObstacleTextures = {
+        ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-NullPtr.png"),
+        ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-OutOfMemory.png"),
+        ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-StackOverflow.png"),
+        ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-Condition.png"),
+        ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-While.png"),
+        ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/CodeObstacles/CodeLine-Missing_.png")
+    };
 
     initLevel(m_currentLevel, ctx);
 }
@@ -4401,18 +4381,61 @@ void GameplayLayer::initLevel(int level, EngineContext* ctx) {
     m_isGameOver = false;
     m_isLevelComplete = false;
     m_timerStarted = false;
+    m_totalLanesSpawned = 0;
 
-    generateLanesForLevel(level);
+    m_playerStartY = 741.0f;
+    m_deathBorderY = 805.0f;
+    m_topGeneratedY = m_playerStartY;
 
-    m_playerStartY = m_lanes.front().yPosition;
-    m_goalY = m_lanes.back().yPosition;
-    m_deathBorderY = m_playerStartY + 64.0f; // Shrinking border starts below the player spawn
+    m_player = m_scene.spawn<StudentPlayerEntity>(ctx, glm::vec2(576.0f, m_playerStartY), this);
 
-    spawnLaneEntities(ctx);
+    if (m_mode == GameMode::Endless) {
+        generateEndlessChunk(25, ctx);
+    }
+    else {
+        generateLanesForLevel(level);
+        m_goalY = m_lanes.back().yPosition;
+        for (size_t i = 0; i < m_lanes.size(); ++i) {
+            spawnSingleLaneEntities(m_lanes[i], ctx, (i == m_lanes.size() - 1));
+        }
+    }
 
-    if (m_player) {
-        ctx->cameraPos = glm::vec2(0.0f, m_player->position.y - 450.0f);
-        m_cameraTargetY = ctx->cameraPos.y;
+    ctx->cameraPos = glm::vec2(0.0f, 0.0f);
+    m_cameraTargetY = 0.0f;
+}
+
+void GameplayLayer::generateEndlessChunk(int count, EngineContext* ctx) {
+    static uint64_t sessionTimeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(static_cast<uint32_t>(sessionTimeSeed + m_totalLanesSpawned * 7919));
+
+    std::uniform_real_distribution<float> speedDist(130.0f, 220.0f);
+    std::uniform_real_distribution<float> offsetDist(0.0f, 320.0f);
+    std::uniform_int_distribution<int> hazardTypeDist(0, 3);
+    std::bernoulli_distribution dirDist(0.5);
+
+    const LaneType hazardPool[] = { LaneType::Asphalt, LaneType::ElevatorTile, LaneType::IDELane, LaneType::Water };
+
+    for (int i = 0; i < count; ++i) {
+        float currentY = m_topGeneratedY - (m_totalLanesSpawned == 0 ? 0.0f : 64.0f);
+        m_topGeneratedY = currentY;
+
+        LaneType type = (m_totalLanesSpawned == 0 || m_totalLanesSpawned % 6 == 0)
+            ? LaneType::SafeZone
+            : hazardPool[hazardTypeDist(rng)];
+
+        LaneData lane{
+            .yPosition = currentY,
+            .height = 64.0f,
+            .type = type,
+            .moveSpeed = (type == LaneType::SafeZone) ? 0.0f : speedDist(rng),
+            .direction = dirDist(rng) ? 1 : -1,
+            .spawnXOffset = offsetDist(rng),
+            .seed = static_cast<uint32_t>(rng())
+        };
+
+        m_lanes.push_back(lane);
+        spawnSingleLaneEntities(lane, ctx, false);
+        m_totalLanesSpawned++;
     }
 }
 
@@ -4424,12 +4447,12 @@ void GameplayLayer::generateLanesForLevel(int level) {
     std::uniform_int_distribution<int> hazardTypeDist(0, 3);
     std::bernoulli_distribution dirDist(0.5);
 
-    int totalLanes = (m_mode == GameMode::Endless) ? 14 : (10 + (level * 3));
-    float startY = 700.0f;
+    int totalLanes = 10 + (level * 2);
+    float startY = 741.0f;
     float laneHeight = 64.0f;
 
     m_lanes.clear();
-    m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
+    m_lanes.push_back({ startY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
 
     const LaneType hazardPool[] = { LaneType::Asphalt, LaneType::ElevatorTile, LaneType::IDELane, LaneType::Water };
 
@@ -4441,7 +4464,7 @@ void GameplayLayer::generateLanesForLevel(int level) {
     while (currentLaneIdx < totalLanes - 1) {
         if (consecutiveHazards >= 4) {
             float currentY = startY - (currentLaneIdx * laneHeight);
-            m_lanes.push_back({ currentY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
+            m_lanes.push_back({ currentY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
             consecutiveHazards = 0;
             currentLaneIdx++;
             continue;
@@ -4453,12 +4476,12 @@ void GameplayLayer::generateLanesForLevel(int level) {
         for (int c = 0; c < clusterSize && currentLaneIdx < totalLanes - 1; ++c) {
             float currentY = startY - (currentLaneIdx * laneHeight);
             float speed = speedDist(rng);
-
             int dir = dirDist(rng) ? 1 : -1;
-            if (dir == lastDirection) {
-                if (++sameDirStreak >= 2) { dir = -dir; sameDirStreak = 1; }
+
+            if (dir == lastDirection && ++sameDirStreak >= 2) {
+                dir = -dir; sameDirStreak = 1;
             }
-            else {
+            else if (dir != lastDirection) {
                 sameDirStreak = 1;
             }
             lastDirection = dir;
@@ -4470,103 +4493,98 @@ void GameplayLayer::generateLanesForLevel(int level) {
     }
 
     float goalY = startY - ((totalLanes - 1) * laneHeight);
-    m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng(), 0.0f, 0 });
+    m_lanes.push_back({ goalY, laneHeight, LaneType::SafeZone, 0.0f, 0, 0.0f, rng() });
 }
 
-void GameplayLayer::spawnLaneEntities(EngineContext* ctx) {
-    m_player = m_scene.spawn<StudentPlayerEntity>(ctx, glm::vec2(576.0f, m_playerStartY), this);
+void GameplayLayer::spawnSingleLaneEntities(const LaneData& lane, EngineContext* ctx, bool isGoal) {
+    std::mt19937 laneRng(lane.seed);
 
-    TextureHandle busSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Bus/shortBus-sheet.png");
-    TextureHandle teacherQuanSheet = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Teacher/Teacher Quan - animation.png");
+    if (isGoal) {
+        m_scene.spawn<GoalEntity>(ctx, glm::vec2(0.0f, lane.yPosition));
+        return;
+    }
 
-    for (size_t i = 0; i < m_lanes.size(); ++i) {
-        const auto& lane = m_lanes[i];
-        std::mt19937 laneRng(lane.seed);
+    if (lane.type == LaneType::SafeZone && lane.yPosition < 741.0f) {
+        int benchCount = std::uniform_int_distribution<int>(1, 3)(laneRng);
+        std::vector<int> validCols(16);
+        std::iota(validCols.begin(), validCols.end(), 1);
+        std::shuffle(validCols.begin(), validCols.end(), laneRng);
 
-        if (i == m_lanes.size() - 1) {
-            m_scene.spawn<GoalEntity>(ctx, glm::vec2(0.0f, lane.yPosition));
+        for (int b = 0; b < benchCount; ++b) {
+            m_scene.spawn<BenchEntity>(ctx, glm::vec2(validCols[b] * 64.0f, lane.yPosition));
         }
-        else if (lane.type == LaneType::SafeZone && i > 0) {
-            std::uniform_int_distribution<int> benchCountDist(1, 3);
-            int benchCount = benchCountDist(laneRng);
 
-            std::vector<int> validTileCols(16);
-            std::iota(validTileCols.begin(), validTileCols.end(), 1);
-            std::shuffle(validTileCols.begin(), validTileCols.end(), laneRng);
+        auto buffType = static_cast<TeacherBuffType>(std::uniform_int_distribution<int>(0, 2)(laneRng));
+        auto* teacher = m_scene.spawn<TeacherNPCEntity>(
+            ctx,
+            glm::vec2(validCols[benchCount] * 64.0f, lane.yPosition),
+            glm::vec2(validCols[benchCount + 1] * 64.0f, lane.yPosition),
+            buffType
+        );
+        teacher->setPlayer(m_player);
+    }
+    else if (lane.type == LaneType::Asphalt) {
+        int count = std::uniform_int_distribution<int>(1, 2)(laneRng);
+        float sector = 1100.0f / count;
 
-            for (int b = 0; b < benchCount; ++b) {
-                m_scene.spawn<BenchEntity>(ctx, glm::vec2(validTileCols[b] * 64.0f, lane.yPosition));
-            }
-
-            std::uniform_int_distribution<int> buffTypeDist(0, 2);
-            auto* teacher = m_scene.spawn<TeacherNPCEntity>(
-                ctx,
-                glm::vec2(validTileCols[benchCount] * 64.0f, lane.yPosition),
-                glm::vec2(validTileCols[benchCount + 1] * 64.0f, lane.yPosition),
-                static_cast<TeacherBuffType>(buffTypeDist(laneRng))
+        for (int b = 0; b < count; ++b) {
+            float x = std::fmod((b * sector) + lane.spawnXOffset, 1100.0f);
+            auto* bus = m_scene.spawn<MovingHazardEntity>(
+                ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
+                glm::vec2(130.0f, 48.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
+                false, 8.0f, glm::vec4(1.0f), 40
             );
-            teacher->animator.addAnimation("patrol", AnimationClip{ teacherQuanSheet, { 6, 4 }, 0, 5, 0.15f, true });
-            teacher->animator.play("patrol");
-            teacher->setPlayer(m_player);
+            bus->animator.addAnimation("drive", AnimationClip{ m_texBusSheet, { 4, 1 }, 0, 3, 0.1f, true });
+            bus->animator.play("drive");
         }
-        else if (lane.type == LaneType::Asphalt) {
-            int busCount = std::uniform_int_distribution<int>(1, (m_currentLevel >= 3) ? 3 : 2)(laneRng);
-            float sector = 1100.0f / busCount;
+    }
+    else if (lane.type == LaneType::ElevatorTile) {
+        auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(ctx, glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
+        m_elevatorCrowds.push_back(crowd);
+    }
+    else if (lane.type == LaneType::IDELane) {
+        int count = std::uniform_int_distribution<int>(2, 3)(laneRng);
+        float sector = 1100.0f / count;
 
-            for (int b = 0; b < busCount; ++b) {
-                float x = std::fmod((b * sector) + lane.spawnXOffset, 1100.0f);
-                auto* bus = m_scene.spawn<MovingHazardEntity>(
-                    ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
-                    glm::vec2(130.0f, 48.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
-                    false, 8.0f, glm::vec4(1.0f), 40
-                );
-                bus->animator.addAnimation("drive", AnimationClip{ busSheet, { 4, 1 }, 0, 3, 0.1f, true });
-                bus->animator.play("drive");
-            }
+        for (int c = 0; c < count; ++c) {
+            float x = std::fmod((c * sector) + lane.spawnXOffset, 1100.0f);
+            TextureHandle codeTex = m_codeObstacleTextures[c % m_codeObstacleTextures.size()];
+            auto* stream = m_scene.spawn<MovingHazardEntity>(
+                ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
+                glm::vec2(110.0f, 40.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
+                false, 12.0f, glm::vec4(1.0f), 40
+            );
+            stream->animator.addAnimation("stream", AnimationClip{ codeTex, { 1, 1 }, 0, 0, 1.0f, false });
+            stream->animator.play("stream");
         }
-        else if (lane.type == LaneType::ElevatorTile) {
-            auto* crowd = m_scene.spawn<ElevatorCrowdEntity>(ctx, glm::vec2(0.0f, lane.yPosition), lane.moveSpeed, lane.direction);
-            m_elevatorCrowds.push_back(crowd);
-        }
-        else if (lane.type == LaneType::IDELane) {
-            int count = std::uniform_int_distribution<int>(2, 3)(laneRng);
-            float sector = 1100.0f / count;
+    }
+    else if (lane.type == LaneType::Water) {
+        int count = std::uniform_int_distribution<int>(2, 4)(laneRng);
+        float sector = 1050.0f / count;
 
-            for (int c = 0; c < count; ++c) {
-                float x = std::fmod((c * sector) + lane.spawnXOffset, 1100.0f);
-                m_scene.spawn<MovingHazardEntity>(
-                    ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
-                    glm::vec2(110.0f, 40.0f), CollisionLayer::Layer_Enemy, CollisionLayer::Layer_Player,
-                    false, 12.0f, glm::vec4(0.65f, 0.2f, 0.85f, 1.0f), 40
-                );
-            }
-        }
-        else if (lane.type == LaneType::Water) {
-            int count = std::uniform_int_distribution<int>(2, 4)(laneRng);
-            float sector = 1050.0f / count;
-
-            for (int l = 0; l < count; ++l) {
-                float x = std::fmod((l * sector) + lane.spawnXOffset, 1050.0f);
-                m_scene.spawn<MovingHazardEntity>(
-                    ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
-                    glm::vec2(170.0f, 50.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
-                    true, 7.0f, glm::vec4(0.45f, 0.28f, 0.12f, 1.0f), 25
-                );
-            }
+        for (int l = 0; l < count; ++l) {
+            float x = std::fmod((l * sector) + lane.spawnXOffset, 1050.0f);
+            auto* platform = m_scene.spawn<MovingHazardEntity>(
+                ctx, glm::vec2(x, lane.yPosition), lane.moveSpeed, lane.direction,
+                glm::vec2(170.0f, 50.0f), CollisionLayer::Layer_TriggerVolume, CollisionLayer::Layer_Player,
+                true, 7.0f, glm::vec4(1.0f), 25
+            );
+            platform->animator.addAnimation("float", AnimationClip{ m_texExamPaper, { 1, 1 }, 0, 0, 1.0f, false });
+            platform->animator.play("float");
         }
     }
 }
 
 void GameplayLayer::updateWaterAnimation(float dt) {
-    int totalFrames = static_cast<int>(m_waterAtlasDims.x * m_waterAtlasDims.y);
-    if (totalFrames <= 0) return;
+    int total = static_cast<int>(m_waterAtlasDims.x * m_waterAtlasDims.y);
+    if (total <= 0) return;
 
     for (auto& lane : m_lanes) {
         if (lane.type != LaneType::Water) continue;
         lane.waterAnimTimer += dt;
         if (lane.waterAnimTimer >= m_waterFrameDuration) {
             lane.waterAnimTimer -= m_waterFrameDuration;
-            lane.waterAnimFrame = static_cast<uint8_t>((lane.waterAnimFrame + 1) % totalFrames);
+            lane.waterAnimFrame = static_cast<uint8_t>((lane.waterAnimFrame + 1) % total);
         }
     }
 }
@@ -4612,10 +4630,8 @@ void GameplayLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
 
 void GameplayLayer::update(double dt, EngineContext* ctx) {
     if (m_isGameOver || m_isLevelComplete) return;
-
     float fDt = static_cast<float>(dt);
 
-    // 1. TIMER TRIGGER: Only starts when the player initiates their first move
     if (!m_timerStarted && m_player && m_player->hasStartedFirstMove()) {
         m_timerStarted = true;
     }
@@ -4624,22 +4640,22 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
         m_elapsedTime += fDt;
         ctx->blackboard.set("elapsedTime", m_elapsedTime);
 
-        // 2. ENDLESS MODE: Creeping death border rises upward
         if (m_mode == GameMode::Endless) {
-            float speed = m_deathBorderSpeed + (m_currentLevel * 4.0f);
-            m_deathBorderY -= speed * fDt;
+            m_deathBorderY -= m_deathBorderSpeed * fDt;
 
-            // Kill player if caught by the shrinking bottom border
             if (m_player && m_player->position.y >= m_deathBorderY) {
                 triggerGameOver(ctx);
                 return;
             }
 
+            if (m_player && m_player->position.y < m_topGeneratedY + 800.0f) {
+                generateEndlessChunk(15, ctx);
+            }
+
             int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
             int timeScore = static_cast<int>(m_elapsedTime * 15.0f);
             int multiplier = m_player ? m_player->getScoreMultiplier() : 1;
-            m_currentScore = (timeScore + distanceScore) * multiplier;
-            ctx->blackboard.set("currentScore", m_currentScore);
+            updateScore((timeScore + distanceScore) * multiplier, ctx);
         }
     }
 
@@ -4666,21 +4682,20 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
     if (m_player) {
         m_player->postPhysicsUpdate(fDt, ctx);
 
-        if (m_player->position.y <= m_goalY + 20.0f) {
+        if (m_mode == GameMode::Campaign && m_player->position.y <= m_goalY + 20.0f) {
             triggerLevelComplete(ctx);
             return;
         }
 
-        m_cameraTargetY = m_player->position.y - 450.0f;
+        m_cameraTargetY = (std::min)(0.0f, m_player->position.y - 450.0f);
         float factor = 1.0f - std::exp(-6.0f * fDt);
         ctx->cameraPos.y = glm::mix(ctx->cameraPos.y, m_cameraTargetY, factor);
 
         if (m_mode == GameMode::Campaign && m_timerStarted) {
             int distanceScore = static_cast<int>((m_playerStartY - m_player->position.y) / 64.0f) * 10;
             int multiplier = m_player->getScoreMultiplier();
-            if (distanceScore > m_currentScore) {
-                m_currentScore = distanceScore * multiplier;
-                ctx->blackboard.set("currentScore", m_currentScore);
+            if (distanceScore * multiplier > m_currentScore) {
+                updateScore(distanceScore * multiplier, ctx);
             }
         }
     }
@@ -4724,17 +4739,13 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         }
     }
 
-    // 3. Render Endless Mode Shrinking Death Border Danger Zone
     if (m_mode == GameMode::Endless) {
-        // Red warning fog behind the creeping line
         writeBuffer.push_command(80, 0, RectPayload{
-            .dest_rect = { 0.0f, m_deathBorderY, 1200.0f, 600.0f },
+            .dest_rect = { 0.0f, m_deathBorderY, 1200.0f, 800.0f },
             .color = { 0.85f, 0.1f, 0.1f, 0.45f },
             .no_texture = true,
             .is_world_space = true
             });
-
-        // Glowing Laser Line
         writeBuffer.push_command(85, 0, RectPayload{
             .dest_rect = { 0.0f, m_deathBorderY - 4.0f, 1200.0f, 8.0f },
             .color = { 1.0f, 0.2f, 0.2f, 0.95f },
@@ -4749,23 +4760,16 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
 void GameplayLayer::triggerGameOver(EngineContext* ctx) {
     if (m_isGameOver) return;
     m_isGameOver = true;
+    updateScore(m_currentScore, ctx);
     ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(false));
 }
 
 void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     if (m_isLevelComplete) return;
 
-    if (m_mode == GameMode::Endless) {
-        m_currentLevel++;
-        ctx->blackboard.set("currentLevel", m_currentLevel);
-        initLevel(m_currentLevel, ctx);
-        return;
-    }
-
     if (m_currentLevel < m_maxLevel) {
         int timeBonus = (std::max)(0, static_cast<int>(1000.0f - (m_elapsedTime * 20.0f)));
-        m_currentScore += timeBonus;
-        ctx->blackboard.set("currentScore", m_currentScore);
+        updateScore(m_currentScore + timeBonus, ctx);
 
         m_currentLevel++;
         ctx->blackboard.set("currentLevel", m_currentLevel);
@@ -4773,6 +4777,7 @@ void GameplayLayer::triggerLevelComplete(EngineContext* ctx) {
     }
     else {
         m_isLevelComplete = true;
+        updateScore(m_currentScore, ctx);
         ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
     }
 }
@@ -4803,35 +4808,45 @@ private:
     GameMode m_mode = GameMode::Campaign;
 
     int m_currentLevel = 1;
-    int m_maxLevel = 5;
+    int m_maxLevel = MAX_CAMPAIGN_LEVELS;
     int m_currentScore = 0;
+    int m_highestScore = 0; // High score tracker preserved across restarts
     float m_elapsedTime = 0.0f;
-    bool m_timerStarted = false; // Only true after player's first move
+    bool m_timerStarted = false;
 
-    // Endless Mode Shrinking Death Border
-    float m_deathBorderY = 0.0f;
-    float m_deathBorderSpeed = 42.0f;
+    // Endless Infinite Generation Trackers
+    float m_topGeneratedY = 700.0f;
+    int m_totalLanesSpawned = 0;
+    float m_deathBorderY = 764.0f;
+    float m_deathBorderSpeed = 44.0f;
 
-    float m_playerStartY = 700.0f;
+    float m_playerStartY = 741.0f;
     float m_goalY = 0.0f;
     float m_cameraTargetY = 0.0f;
 
     bool m_isGameOver = false;
     bool m_isLevelComplete = false;
 
+    // Texture Cache
     TextureHandle m_texSafeZone{};
     TextureHandle m_texRoad{};
     TextureHandle m_texElevatorRoad{};
     TextureHandle m_texCodeLine{};
     TextureHandle m_texWater{};
+    TextureHandle m_texBusSheet{};
+    TextureHandle m_texExamPaper{};
+    std::vector<TextureHandle> m_codeObstacleTextures;
+
     glm::uvec2 m_waterAtlasDims{ 4, 1 };
     float m_waterFrameDuration = 0.12f;
 
     void initLevel(int level, EngineContext* ctx);
     void generateLanesForLevel(int level);
-    void spawnLaneEntities(EngineContext* ctx);
+    void generateEndlessChunk(int count, EngineContext* ctx);
+    void spawnSingleLaneEntities(const LaneData& lane, EngineContext* ctx, bool isGoal = false);
     void updateElevatorSignals(float dt);
     void updateWaterAnimation(float dt);
+    void updateScore(int newScore, EngineContext* ctx);
 
 public:
     GameplayLayer() = default;
@@ -4853,7 +4868,9 @@ public:
 // ==========================================
 ```cpp
 #include "HUD.hpp"
+#include <algorithm>
 #include <cstdio>
+#include <cmath>
 
 void HUDLayer::onAttach(EngineContext* ctx) {
     if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) {
@@ -4861,165 +4878,186 @@ void HUDLayer::onAttach(EngineContext* ctx) {
     }
 }
 
-void HUDLayer::onDetach(EngineContext* ctx) {}
-
-void HUDLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {}
-
 void HUDLayer::update(double dt, EngineContext* ctx) {
-    if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) {
-        m_currentScore = *scoreOpt;
-    }
-    if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) {
-        m_highestScore = *highScoreOpt;
-    }
-    if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) {
-        m_currentLevel = *levelOpt;
-    }
+    if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) m_currentScore = *scoreOpt;
+    if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) m_highestScore = *highScoreOpt;
+    if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
+    if (auto maxLvlOpt = ctx->blackboard.get<int>("maxLevel")) m_maxLevel = *maxLvlOpt;
+    if (auto timeOpt = ctx->blackboard.get<float>("elapsedTime")) m_elapsedTime = *timeOpt;
+    if (auto modeOpt = ctx->blackboard.get<int>("gameMode")) m_mode = static_cast<GameMode>(*modeOpt);
 
-    if (auto shieldOpt = ctx->blackboard.get<bool>("buffShield")) {
-        m_buffShieldActive = *shieldOpt;
-    }
-    if (auto speedOpt = ctx->blackboard.get<float>("buffSpeedTimer")) {
-        m_buffSpeedTimer = *speedOpt;
-    }
-    if (auto gpaOpt = ctx->blackboard.get<float>("buffGpaTimer")) {
-        m_buffGpaTimer = *gpaOpt;
-    }
-    if (auto invOpt = ctx->blackboard.get<float>("buffInvincibleTimer")) {
-        m_buffInvincibleTimer = *invOpt;
-    }
+    if (auto shieldOpt = ctx->blackboard.get<bool>("buffShield")) m_buffShieldActive = *shieldOpt;
+    if (auto speedOpt = ctx->blackboard.get<float>("buffSpeedTimer")) m_buffSpeedTimer = *speedOpt;
+    if (auto gpaOpt = ctx->blackboard.get<float>("buffGpaTimer")) m_buffGpaTimer = *gpaOpt;
+    if (auto invOpt = ctx->blackboard.get<float>("buffInvincibleTimer")) m_buffInvincibleTimer = *invOpt;
 }
 
 void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Top HUD Ribbon Background
+    TextureHandle idCardTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/GameHUD/NewUI.png");
+    TextureHandle pointMeter = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/GameHUD/PointMeter/PointMeter.png");
+    TextureHandle buffIconTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/GameHUD/iconBuff.png");
+
+    int minutes = static_cast<int>(m_elapsedTime) / 60;
+    float seconds = std::fmod(m_elapsedTime, 60.0f);
+
+    // ========================================================================
+    // 1. STUDENT ID CARD (Positioned on the LEFT, Scaled up)
+    // ========================================================================
+    float idX = 18.0f;
+    float idY = 8.0f;
+    float idW = 260.0f;
+    float idH = 138.0f;
+
+    if (m_mode == GameMode::Campaign) {
+        writeBuffer.push_command(515, 0, RectPayload{
+            .dest_rect = { idX, idY, idW, idH },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = idCardTex,
+            .no_texture = false,
+            .is_world_space = false
+            });
+
+        uint32_t meterFrame = std::clamp<uint32_t>(
+            static_cast<uint32_t>((m_currentLevel * 10) / (std::max)(1, m_maxLevel)),
+            0, 10
+        );
+
+        writeBuffer.push_command(520, 0, RectPayload{
+            .dest_rect = { idX + 150.0f, idY + 60.0f, 92.0f, 22.0f },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .texture = pointMeter,
+            .atlas_dimensions = { 11, 1 },
+            .atlas_pos = { meterFrame, 0 },
+            .no_texture = false,
+            .is_world_space = false
+            });
+
+        TextPayload expTimeText{
+            .position = { idX + 170.0f, idY + 104.0f },
+            .color = { 0.08f, 0.10f, 0.14f, 1.0f },
+            .scale = 16.0f,
+            .showInCenter = false
+        };
+        std::snprintf(expTimeText.text_content, sizeof(expTimeText.text_content), "%02d:%04.1f", minutes, seconds);
+        writeBuffer.push_command(530, 0, expTimeText);
+    }
+
+    // ========================================================================
+    // 2. TOP TELEMETRY RIBBON
+    // ========================================================================
+    float ribbonX = (m_mode == GameMode::Campaign) ? (idX + idW + 16.0f) : 0.0f;
+    float ribbonW = (m_mode == GameMode::Campaign) ? (1200.0f - ribbonX) : 1200.0f;
+
     writeBuffer.push_command(500, 0, RectPayload{
-        .dest_rect = { 0.0f, 0.0f, 1200.0f, 50.0f },
-        .color = { 0.05f, 0.07f, 0.09f, 0.85f },
+        .dest_rect = { ribbonX, 0.0f, ribbonW, 54.0f },
+        .color = { 0.06f, 0.08f, 0.10f, 0.95f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // 2. Left Telemetry
-    TextPayload scoreText;
-    scoreText.color = { 1.0f, 0.9f, 0.2f, 1.0f };
-    scoreText.scale = 22.0f;
-    scoreText.position = { 20.0f, 32.0f };
-    scoreText.showInCenter = false;
-    std::snprintf(scoreText.text_content, sizeof(scoreText.text_content),
-        "SCORE: %d | HIGH: %d", m_currentScore, m_highestScore);
+    TextPayload scoreText{
+        .position = { ribbonX + 24.0f, 34.0f },
+        .color = { 1.0f, 0.9f, 0.2f, 1.0f },
+        .scale = 20.0f,
+        .showInCenter = false
+    };
+    std::snprintf(scoreText.text_content, sizeof(scoreText.text_content), "SCORE: %d (HIGH: %d)", m_currentScore, m_highestScore);
     writeBuffer.push_command(510, 0, scoreText);
 
-    // 3. Center Telemetry
-    TextPayload levelText;
-    levelText.color = { 0.3f, 0.85f, 1.0f, 1.0f };
-    levelText.scale = 24.0f;
-    levelText.position = { 600.0f, 32.0f };
-    levelText.showInCenter = true;
-    std::snprintf(levelText.text_content, sizeof(levelText.text_content),
-        "LEVEL %d", m_currentLevel);
-    writeBuffer.push_command(510, 0, levelText);
+    if (m_mode == GameMode::Endless) {
+        TextPayload levelText{
+            .position = { 600.0f, 34.0f },
+            .color = { 0.3f, 0.85f, 1.0f, 1.0f },
+            .scale = 22.0f,
+            .showInCenter = true
+        };
+        std::snprintf(levelText.text_content, sizeof(levelText.text_content), "ENDLESS MODE");
+        writeBuffer.push_command(510, 0, levelText);
 
-    // 4. Right Telemetry
-    TextPayload playerText;
-    playerText.color = { 0.9f, 0.95f, 1.0f, 1.0f };
-    playerText.scale = 20.0f;
-    playerText.position = { 1180.0f, 32.0f };
-    playerText.showInCenter = false;
-    std::snprintf(playerText.text_content, sizeof(playerText.text_content),
-        "STUDENT: %s", m_playerName.c_str());
-    writeBuffer.push_command(510, 0, playerText);
+        TextPayload timeText{
+            .position = { 1080.0f, 34.0f },
+            .color = { 0.2f, 1.0f, 0.4f, 1.0f },
+            .scale = 22.0f,
+            .showInCenter = true
+        };
+        std::snprintf(timeText.text_content, sizeof(timeText.text_content), "TIME: %02d:%04.1f", minutes, seconds);
+        writeBuffer.push_command(510, 0, timeText);
+    }
 
-    // ============================================================================
-    // ACTIVE BUFF STATUS BADGES DISPLAY (POSITIONED AT Y = 56.0f)
-    // ============================================================================
-    float badgeX = 20.0f;
-    float badgeY = 56.0f;
-    float badgeHeight = 32.0f;
-    float badgeGap = 10.0f;
+    // ========================================================================
+    // 3. VERTICAL DROPDOWN STATUS BUFF BADGES (Under ID card)
+    // ========================================================================
+    float badgeX = 18.0f;
+    float currentBadgeY = (m_mode == GameMode::Campaign) ? (idY + idH + 12.0f) : 64.0f;
+    float badgeH = 30.0f;
+    float badgeGap = 8.0f;
 
-    // BADGE 1: ACTIVE INVINCIBILITY TIMER (TRIGGERED SHIELD)
+    auto renderBadge = [&](glm::vec4 boxColor, glm::vec4 borderColor, glm::vec4 iconColor, const char* textStr) {
+        float boxW = 140.0f;
+        float boxX = badgeX + 32.0f;
+        float centerX = boxX + (boxW * 0.5f);
+        float centerY = currentBadgeY + (badgeH * 0.5f) + 5.0f;
+
+        writeBuffer.push_command(520, 0, RectPayload{
+            .dest_rect = { boxX, currentBadgeY, boxW, badgeH },
+            .color = boxColor,
+            .no_texture = true,
+            .is_world_space = false
+            });
+
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY}, {boxX + boxW, currentBadgeY}, borderColor, 1.5f });
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY}, {boxX, currentBadgeY + badgeH}, borderColor, 1.5f });
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX + boxW, currentBadgeY}, {boxX + boxW, currentBadgeY + badgeH}, borderColor, 1.5f });
+        writeBuffer.push_command(525, 0, LinePayload{ {boxX, currentBadgeY + badgeH}, {boxX + boxW, currentBadgeY + badgeH}, borderColor, 1.5f });
+
+        writeBuffer.push_command(530, 0, RectPayload{
+            .dest_rect = { badgeX, currentBadgeY, 30.0f, 30.0f },
+            .color = iconColor,
+            .texture = buffIconTex,
+            .no_texture = false,
+            .is_world_space = false
+            });
+
+        TextPayload shadowTxt{
+            .position = { centerX + 1.0f, centerY + 1.0f },
+            .color = { 0.05f, 0.05f, 0.05f, 0.9f },
+            .scale = 15.0f,
+            .showInCenter = true
+        };
+        std::snprintf(shadowTxt.text_content, sizeof(shadowTxt.text_content), "%s", textStr);
+        writeBuffer.push_command(545, 0, shadowTxt);
+
+        TextPayload frontTxt{
+            .position = { centerX, centerY },
+            .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+            .scale = 15.0f,
+            .showInCenter = true
+        };
+        std::snprintf(frontTxt.text_content, sizeof(frontTxt.text_content), "%s", textStr);
+        writeBuffer.push_command(550, 0, frontTxt);
+
+        currentBadgeY += badgeH + badgeGap;
+        };
+
     if (m_buffInvincibleTimer > 0.0f) {
-        float badgeW = 180.0f;
-
-        writeBuffer.push_command(520, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, badgeW, badgeHeight },
-            .color = { 0.1f, 0.75f, 0.9f, 0.85f }, // Cyan background
-            .no_texture = true,
-            .is_world_space = false
-            });
-
-        TextPayload invText;
-        invText.color = { 1.0f, 1.0f, 1.0f, 1.0f };
-        invText.scale = 16.0f;
-        invText.position = { badgeX + (badgeW * 0.5f), badgeY + 22.0f };
-        invText.showInCenter = true;
-        std::snprintf(invText.text_content, sizeof(invText.text_content), "INVINCIBLE: %.1fs", m_buffInvincibleTimer);
-        writeBuffer.push_command(530, 0, invText);
-
-        badgeX += badgeW + badgeGap;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "INVINCIBLE: %.1fs", m_buffInvincibleTimer);
+        renderBadge({ 0.08f, 0.50f, 0.70f, 0.95f }, { 0.3f, 0.85f, 1.0f, 1.0f }, { 0.2f, 0.9f, 1.0f, 1.0f }, buf);
     }
-    // BADGE 1 ALT: DEADLINE SHIELD READY
     else if (m_buffShieldActive) {
-        float badgeW = 180.0f;
-
-        writeBuffer.push_command(520, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, badgeW, badgeHeight },
-            .color = { 0.8f, 0.65f, 0.1f, 0.85f }, // Gold background
-            .no_texture = true,
-            .is_world_space = false
-            });
-
-        TextPayload shieldText;
-        shieldText.color = { 1.0f, 1.0f, 1.0f, 1.0f };
-        shieldText.scale = 16.0f;
-        shieldText.position = { badgeX + (badgeW * 0.5f), badgeY + 22.0f };
-        shieldText.showInCenter = true;
-        std::snprintf(shieldText.text_content, sizeof(shieldText.text_content), "[SHIELD: READY]");
-        writeBuffer.push_command(530, 0, shieldText);
-
-        badgeX += badgeW + badgeGap;
+        renderBadge({ 0.70f, 0.55f, 0.08f, 0.95f }, { 1.0f, 0.85f, 0.2f, 1.0f }, { 1.0f, 0.85f, 0.1f, 1.0f }, "[SHIELD: READY]");
     }
 
-    // BADGE 2: SPEED BOOST
     if (m_buffSpeedTimer > 0.0f) {
-        float badgeW = 180.0f;
-
-        writeBuffer.push_command(520, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, badgeW, badgeHeight },
-            .color = { 0.15f, 0.7f, 0.25f, 0.85f }, // Green background
-            .no_texture = true,
-            .is_world_space = false
-            });
-
-        TextPayload speedText;
-        speedText.color = { 1.0f, 1.0f, 1.0f, 1.0f };
-        speedText.scale = 16.0f;
-        speedText.position = { badgeX + (badgeW * 0.5f), badgeY + 22.0f };
-        speedText.showInCenter = true;
-        std::snprintf(speedText.text_content, sizeof(speedText.text_content), "SPEED: %.1fs", m_buffSpeedTimer);
-        writeBuffer.push_command(530, 0, speedText);
-
-        badgeX += badgeW + badgeGap;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "SPEED: %.1fs", m_buffSpeedTimer);
+        renderBadge({ 0.12f, 0.55f, 0.22f, 0.95f }, { 0.3f, 0.95f, 0.4f, 1.0f }, { 0.2f, 0.85f, 0.3f, 1.0f }, buf);
     }
 
-    // BADGE 3: 2X GPA MULTIPLIER
     if (m_buffGpaTimer > 0.0f) {
-        float badgeW = 180.0f;
-
-        writeBuffer.push_command(520, 0, RectPayload{
-            .dest_rect = { badgeX, badgeY, badgeW, badgeHeight },
-            .color = { 0.65f, 0.15f, 0.75f, 0.85f }, // Purple background
-            .no_texture = true,
-            .is_world_space = false
-            });
-
-        TextPayload gpaText;
-        gpaText.color = { 1.0f, 1.0f, 1.0f, 1.0f };
-        gpaText.scale = 16.0f;
-        gpaText.position = { badgeX + (badgeW * 0.5f), badgeY + 22.0f };
-        gpaText.showInCenter = true;
-        std::snprintf(gpaText.text_content, sizeof(gpaText.text_content), "GPA 2X: %.1fs", m_buffGpaTimer);
-        writeBuffer.push_command(530, 0, gpaText);
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "GPA 2X: %.1fs", m_buffGpaTimer);
+        renderBadge({ 0.55f, 0.15f, 0.65f, 0.95f }, { 0.9f, 0.35f, 1.0f, 1.0f }, { 0.85f, 0.2f, 0.95f, 1.0f }, buf);
     }
 }
 ```
@@ -5030,14 +5068,18 @@ void HUDLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx)
 ```cpp
 #pragma once
 #include <Engine/Engine.hpp>
+#include "GameGeneral.hpp"
 #include <string>
 
 class HUDLayer : public IEngineLayer {
 private:
     std::string m_playerName = "HCMUS Student";
+    GameMode m_mode = GameMode::Campaign;
     int m_currentLevel = 1;
+    int m_maxLevel = MAX_CAMPAIGN_LEVELS; // Declared and defaulted to centralized MAX_CAMPAIGN_LEVELS
     int m_currentScore = 0;
     int m_highestScore = 0;
+    float m_elapsedTime = 0.0f;
 
     // --- BUFF HUD TELEMETRY ---
     bool m_buffShieldActive = false;
@@ -5050,12 +5092,12 @@ public:
     ~HUDLayer() override = default;
 
     void onAttach(EngineContext* ctx) override;
-    void onDetach(EngineContext* ctx) override;
+    void onDetach(EngineContext* ctx) override {}
 
     [[nodiscard]] bool blocksEvents() const noexcept override { return false; }
     [[nodiscard]] bool blocksUpdates() const noexcept override { return false; }
 
-    void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
+    void handleEvent(const EngineEvent& event, EngineContext* ctx) override {}
     void update(double dt, EngineContext* ctx) override;
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
 };
@@ -5111,60 +5153,111 @@ struct LaneData {
 #include "HUD.hpp"
 #include "Gameplay.hpp"
 
-void NameInputLayer::onAttach(EngineContext* ctx) {}
-void NameInputLayer::onDetach(EngineContext* ctx) {}
-void NameInputLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {}
-void NameInputLayer::update(double dt, EngineContext* ctx) {}
+// ============================================================================
+// NAME INPUT SCREEN
+// ============================================================================
 void NameInputLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    writeBuffer.push_command(100, 0, RectPayload{ .dest_rect = {0, 0, 1200, 805}, .color = {0.08f, 0.1f, 0.12f, 1.0f}, .no_texture = true });
+    TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
 
-    ctx->ui.TextBox(writeBuffer, ctx, ID_NAME_TextBox, { 450.0f, 320.0f, 300.0f, 50.0f }, m_playerName, m_cursorPos);
+    // 1. Fullscreen Main Menu Backdrop
+    writeBuffer.push_command(50, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = bg,
+        .no_texture = false,
+        .is_world_space = false
+        });
 
-    // SWAP: NameInput -> Gameplay + HUD
-    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Confirm, { 450.0f, 400.0f, 300.0f, 50.0f }, "CONFIRM NAME")) {
+    // Dark Dimming Overlay
+    writeBuffer.push_command(55, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 0.0f, 0.0f, 0.0f, 0.65f },
+        .no_texture = true,
+        .is_world_space = false
+        });
+
+    // 2. Dark Slate Modal Box
+    glm::vec4 panelBounds{ 380.0f, 220.0f, 440.0f, 350.0f };
+    writeBuffer.push_command(60, 0, RectPayload{
+        .dest_rect = panelBounds,
+        .color = { 0.12f, 0.15f, 0.20f, 0.98f },
+        .no_texture = true,
+        .is_world_space = false
+        });
+
+    // Modal Border Lines
+    glm::vec4 borderCol{ 0.28f, 0.35f, 0.46f, 1.0f };
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x + panelBounds.z, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y + panelBounds.w}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+
+    // 3. Header Title
+    TextPayload title{
+        .position = { panelBounds.x + (panelBounds.z * 0.5f), panelBounds.y + 35.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 24.0f,
+        .showInCenter = true
+    };
+    std::snprintf(title.text_content, sizeof(title.text_content), "STUDENT PROFILE");
+    writeBuffer.push_command(70, 0, title);
+
+    // 4. Text Input Box & Action Buttons
+    float btnX = panelBounds.x + 40.0f;
+    float btnW = panelBounds.z - 80.0f;
+
+    ctx->ui.TextBox(writeBuffer, ctx, ID_NAME_TextBox, { btnX, panelBounds.y + 85.0f, btnW, 50.0f }, m_playerName, m_cursorPos, 20.0f);
+
+    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Confirm, { btnX, panelBounds.y + 175.0f, btnW, 45.0f }, "CONFIRM", 20.0f)) {
         ctx->blackboard.set("playerName", m_playerName);
         ctx->layerStack->deferAttach(std::make_unique<ModeSelectLayer>());
         ctx->layerStack->deferDetach(this);
+        return;
     }
 
-    // SWAP: NameInput -> MainMenu
-    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Back, { 450.0f, 470.0f, 300.0f, 45.0f }, "BACK")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_NAME_Back, { btnX, panelBounds.y + 245.0f, btnW, 45.0f }, "BACK", 20.0f)) {
         ctx->layerStack->deferAttach(std::make_unique<MainMenuLayer>());
-        ctx->layerStack->deferDetach(this); // SWAP OUT
+        ctx->layerStack->deferDetach(this);
     }
 }
 
-void MainMenuLayer::onAttach(EngineContext* ctx) {}
-void MainMenuLayer::onDetach(EngineContext* ctx) {}
-void MainMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {}
-void MainMenuLayer::update(double dt, EngineContext* ctx) {}
+// ============================================================================
+// MAIN MENU SCREEN
+// ============================================================================
 void MainMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    writeBuffer.push_command(100, 0, RectPayload{ .dest_rect = {0, 0, 1200, 805}, .color = {0.08f, 0.12f, 0.1f, 1.0f}, .no_texture = true });
+    TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
+    TextureHandle playBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Play button.png");
+    TextureHandle continueBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Continue button.png");
+    TextureHandle optionBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Option button.png");
+    TextureHandle exitBtn = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/Exit button.png");
 
-    // SWAP: MainMenu -> NameInput
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Start, { 470.0f, 280.0f, 260.0f, 55.0f }, "START")) {
+    writeBuffer.push_command(50, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = bg,
+        .no_texture = false,
+        .is_world_space = false
+        });
+
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Start, { 470.0f, 380.0f, 192.0f, 72.0f }, playBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<NameInputLayer>());
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    // SWAP: MainMenu -> LoadMenu
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Continue, { 470.0f, 355.0f, 260.0f, 55.0f }, "CONTINUE")) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Continue, { 470.0f, 455.0f, 192.0f, 72.0f }, continueBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<LoadMenuLayer>());
         ctx->layerStack->deferDetach(this);
         return;
     }
 
-    // ADD FRONT / DIS INPUT -> Push Settings Overlay on top of MainMenu
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Settings, { 470.0f, 430.0f, 260.0f, 55.0f }, "SETTINGS")) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Settings, { 470.0f, 530.0f, 192.0f, 72.0f }, optionBtn, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<SettingsMenuLayer>());
         return;
     }
 
-    // EXIT
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MM_Exit, { 470.0f, 505.0f, 260.0f, 55.0f }, "EXIT")) {
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_MM_Exit, { 470.0f, 605.0f, 192.0f, 72.0f }, exitBtn, { 2, 1 })) {
         ctx->isRunning.store(false, std::memory_order_relaxed);
-        return;
     }
 }
 ```
@@ -5181,20 +5274,21 @@ class NameInputLayer : public IEngineLayer {
 private:
     std::string m_playerName = "Student Name";
     uint32_t m_cursorPos = 12;
+
 public:
-    void onAttach(EngineContext* ctx) override;
-    void onDetach(EngineContext* ctx) override;
-    void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
-    void update(double dt, EngineContext* ctx) override;
+    void onAttach(EngineContext* ctx) override {}
+    void onDetach(EngineContext* ctx) override {}
+    void handleEvent(const EngineEvent& event, EngineContext* ctx) override {}
+    void update(double dt, EngineContext* ctx) override {}
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
 };
 
 class MainMenuLayer : public IEngineLayer {
 public:
-    void onAttach(EngineContext* ctx) override;
-    void onDetach(EngineContext* ctx) override;
-    void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
-    void update(double dt, EngineContext* ctx) override;
+    void onAttach(EngineContext* ctx) override {}
+    void onDetach(EngineContext* ctx) override {}
+    void handleEvent(const EngineEvent& event, EngineContext* ctx) override {}
+    void update(double dt, EngineContext* ctx) override {}
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
 };
 ```
@@ -5209,22 +5303,55 @@ public:
 #include "MainMenu.hpp"
 
 void ModeSelectLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    writeBuffer.push_command(100, 0, RectPayload{
+    TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
+
+    writeBuffer.push_command(50, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
-        .color = { 0.06f, 0.08f, 0.11f, 1.0f },
-        .no_texture = true
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = bg,
+        .no_texture = false,
+        .is_world_space = false
         });
 
-    TextPayload title;
-    title.color = { 1.0f, 0.85f, 0.2f, 1.0f };
-    title.scale = 32.0f;
-    title.position = { 600.0f, 220.0f };
-    title.showInCenter = true;
-    snprintf(title.text_content, sizeof(title.text_content), "SELECT GAME MODE");
-    writeBuffer.push_command(110, 0, title);
+    writeBuffer.push_command(55, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 0.0f, 0.0f, 0.0f, 0.65f },
+        .no_texture = true,
+        .is_world_space = false
+        });
 
-    // CAMPAIGN MODE: 5-level progression
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Campaign, { 450.0f, 300.0f, 300.0f, 55.0f }, "CAMPAIGN (5 LEVELS)")) {
+    glm::vec4 panelBounds{ 380.0f, 200.0f, 440.0f, 380.0f };
+    writeBuffer.push_command(60, 0, RectPayload{
+        .dest_rect = panelBounds,
+        .color = { 0.12f, 0.15f, 0.20f, 0.98f },
+        .no_texture = true,
+        .is_world_space = false
+        });
+
+    glm::vec4 borderCol{ 0.28f, 0.35f, 0.46f, 1.0f };
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y}, {panelBounds.x, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x + panelBounds.z, panelBounds.y}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {panelBounds.x, panelBounds.y + panelBounds.w}, {panelBounds.x + panelBounds.z, panelBounds.y + panelBounds.w}, borderCol, 2.0f });
+
+    TextPayload title{
+        .position = { panelBounds.x + (panelBounds.z * 0.5f), panelBounds.y + 35.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 26.0f,
+        .showInCenter = true
+    };
+    std::snprintf(title.text_content, sizeof(title.text_content), "SELECT GAME MODE");
+    writeBuffer.push_command(70, 0, title);
+
+    float btnX = panelBounds.x + 40.0f;
+    float btnW = panelBounds.z - 80.0f;
+    float startY = panelBounds.y + 85.0f;
+    float gap = 70.0f;
+
+    char campaignLabel[64];
+    std::snprintf(campaignLabel, sizeof(campaignLabel), "CAMPAIGN (%d LEVELS)", MAX_CAMPAIGN_LEVELS);
+
+    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Campaign, { btnX, startY, btnW, 52.0f }, campaignLabel, 18.0f)) {
         ctx->blackboard.set("gameMode", static_cast<int>(GameMode::Campaign));
         ctx->blackboard.set("currentLevel", 1);
         ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
@@ -5233,8 +5360,7 @@ void ModeSelectLayer::populateRenderStream(RenderData& writeBuffer, EngineContex
         return;
     }
 
-    // ENDLESS MODE: Infinite wave survival
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Endless, { 450.0f, 375.0f, 300.0f, 55.0f }, "ENDLESS SURVIVAL")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Endless, { btnX, startY + gap, btnW, 52.0f }, "ENDLESS SURVIVAL", 18.0f)) {
         ctx->blackboard.set("gameMode", static_cast<int>(GameMode::Endless));
         ctx->blackboard.set("currentLevel", 1);
         ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
@@ -5243,10 +5369,9 @@ void ModeSelectLayer::populateRenderStream(RenderData& writeBuffer, EngineContex
         return;
     }
 
-    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Back, { 450.0f, 450.0f, 300.0f, 45.0f }, "BACK")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_MODE_Back, { btnX, startY + (gap * 2.0f) + 10.0f, btnW, 45.0f }, "BACK", 18.0f)) {
         ctx->layerStack->deferAttach(std::make_unique<MainMenuLayer>());
         ctx->layerStack->deferDetach(this);
-        return;
     }
 }
 ```
@@ -5277,96 +5402,118 @@ public:
 #include "SettingsLayer.hpp"
 #include "SaveLoadLayer.hpp"
 #include "MainMenu.hpp"
-#include <iostream>
-#include <cstdio>
-
-void PauseMenuLayer::onAttach(EngineContext* ctx) {
-    std::cout << "[PauseMenuLayer] Pause menu attached -> Gameplay updates and inputs suspended.\n";
-}
-
-void PauseMenuLayer::onDetach(EngineContext* ctx) {
-    std::cout << "[PauseMenuLayer] Pause menu detached -> Resuming active gameplay.\n";
-}
+#include "Gameplay.hpp"
+#include "HUD.hpp"
 
 void PauseMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
-        if (ev.action == GLFW_PRESS) {
-            // Pressing ESCAPE or P toggles pause off and resumes gameplay
-            if (ev.key == GLFW_KEY_ESCAPE || ev.key == GLFW_KEY_P) {
-                ctx->layerStack->deferDetach(this);
-            }
+        if (ev.action == GLFW_PRESS && (ev.key == GLFW_KEY_ESCAPE || ev.key == GLFW_KEY_P)) {
+            ctx->layerStack->deferDetach(this);
         }
     }
 }
 
-void PauseMenuLayer::update(double dt, EngineContext* ctx) {
-    // Logic updates remain completely frozen while paused
-}
-
 void PauseMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Full-screen semi-transparent dimming backdrop
+    // 1. Fullscreen Dimming Backdrop
     writeBuffer.push_command(750, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
-        .color = { 0.0f, 0.0f, 0.0f, 0.72f },
+        .color = { 0.0f, 0.0f, 0.0f, 0.75f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // 2. Pause Menu Dialog Box
+    // 2. Keyboard Panel Background
+    TextureHandle panelTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/MenuPanel.png");
+    TextureHandle settingBtnTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/SettingButton.png");
+    TextureHandle saveBtnTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/SaveButton.png");
+    TextureHandle restartBtnTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/RestartButton.png");
+    TextureHandle playBtnTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/PlayButton.png");
+    TextureHandle mainMenuBtnTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Menu/MainMenuButton.png");
+
     writeBuffer.push_command(760, 0, RectPayload{
         .dest_rect = m_panelBounds,
-        .color = { 0.12f, 0.14f, 0.18f, 0.95f },
-        .no_texture = true,
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = panelTex,
+        .no_texture = false,
         .is_world_space = false
         });
 
     // 3. Header Title
-    TextPayload titleText;
-    titleText.color = { 1.0f, 0.85f, 0.2f, 1.0f }; // Gold accent
-    titleText.scale = 26.0f;
-    titleText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f };
-    titleText.showInCenter = true;
+    TextPayload titleText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y - 18.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 28.0f,
+        .showInCenter = true
+    };
     std::snprintf(titleText.text_content, sizeof(titleText.text_content), "PAUSED");
     writeBuffer.push_command(770, 0, titleText);
 
-    // 4. Immediate-Mode UI Buttons
-    float btnX = m_panelBounds.x + 30.0f;
-    float btnW = m_panelBounds.z - 60.0f;
-    float btnH = 45.0f;
-    float startY = m_panelBounds.y + 75.0f;
-    float gap = 58.0f;
+    // ========================================================================
+    // 4. KEYBOARD KEYCAP BUTTONS ({ 2, 1 } 2-State Spritesheets)
+    // ========================================================================
+    float px = m_panelBounds.x;
+    float py = m_panelBounds.y;
+    float pw = m_panelBounds.z;
+    float ph = m_panelBounds.w;
 
-    // RESUME: Detaches pause menu layer, returning control to GameplayLayer
-    if (ctx->ui.Button(writeBuffer, ctx, ID_PAUSE_Resume, { btnX, startY, btnW, btnH }, "RESUME")) {
-        ctx->layerStack->deferDetach(this);
-        return;
-    }
+    float keySize = 58.0f;
 
-    // SAVE GAME: Pushes SaveMenuLayer on top of PauseMenuLayer
-    if (ctx->ui.Button(writeBuffer, ctx, ID_PAUSE_Save, { btnX, startY + gap, btnW, btnH }, "SAVE GAME")) {
-        ctx->layerStack->deferAttach(std::make_unique<SaveMenuLayer>());
-        return;
-    }
+    // Top Row: Settings (Gear) & Save (Floppy Disk)
+    glm::vec4 settingBounds{ px + (pw * 0.232f), py + (ph * 0.135f), keySize, keySize };
+    glm::vec4 saveBounds{ px + (pw * 0.428f), py + (ph * 0.135f), keySize, keySize };
 
-    // SETTINGS: Pushes SettingsMenuLayer on top of PauseMenuLayer
-    if (ctx->ui.Button(writeBuffer, ctx, ID_PAUSE_Settings, { btnX, startY + (gap * 2.0f), btnW, btnH }, "SETTINGS")) {
+    // Middle Row: Restart (Undo Arrow) & Resume (Play Arrow)
+    glm::vec4 restartBounds{ px + (pw * 0.330f), py + (ph * 0.470f), keySize, keySize };
+    glm::vec4 playBounds{ px + (pw * 0.526f), py + (ph * 0.470f), keySize, keySize };
+
+    // Bottom-Right: Main Menu (ESC Key - Wider 1.5u Keycap)
+    glm::vec4 escBounds{ px + (pw * 0.772f), py + (ph * 0.680f), 80.0f, keySize };
+
+    // --- BUTTON CLICKS ---
+    // SETTINGS BUTTON (Gear)
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Settings, settingBounds, settingBtnTex, { 2, 1 })) {
         ctx->layerStack->deferAttach(std::make_unique<SettingsMenuLayer>());
         return;
     }
 
-    // MAIN MENU: Clears all running layers (Gameplay, HUD, Pause) and reloads MainMenuLayer
-    if (ctx->ui.Button(writeBuffer, ctx, ID_PAUSE_MainMenu, { btnX, startY + (gap * 3.0f), btnW, btnH }, "MAIN MENU")) {
+    // SAVE BUTTON (Floppy)
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Save, saveBounds, saveBtnTex, { 2, 1 })) {
+        ctx->layerStack->deferAttach(std::make_unique<SaveMenuLayer>());
+        return;
+    }
+
+    // RESTART BUTTON (Undo Arrow)
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Restart, restartBounds, restartBtnTex, { 2, 1 })) {
+        ctx->layerStack->deferClear();
+        ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
+        ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
+        return;
+    }
+
+    // RESUME BUTTON (Play Arrow)
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Resume, playBounds, playBtnTex, { 2, 1 })) {
+        ctx->layerStack->deferDetach(this);
+        return;
+    }
+
+    // MAIN MENU BUTTON (ESC)
+    if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_MainMenu, escBounds, mainMenuBtnTex, { 2, 1 })) {
         ctx->layerStack->clear(ctx);
         ctx->layerStack->pushLayer(std::make_unique<MainMenuLayer>(), ctx);
         return;
     }
 
-    // EXIT GAME: Gracefully signals application thread to stop
-    if (ctx->ui.Button(writeBuffer, ctx, ID_PAUSE_Exit, { btnX, startY + (gap * 4.0f), btnW, btnH }, "EXIT GAME")) {
-        ctx->isRunning.store(false, std::memory_order_relaxed);
-        return;
-    }
+    // 5. Helper Legend below the panel
+    TextPayload legendText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + m_panelBounds.w + 28.0f },
+        .color = { 0.75f, 0.8f, 0.85f, 0.9f },
+        .scale = 16.0f,
+        .showInCenter = true
+    };
+    std::snprintf(legendText.text_content, sizeof(legendText.text_content),
+        "[SETTINGS]  [SAVE]  |  [RESTART]  [RESUME]  |  [ESC: MAIN MENU]");
+    writeBuffer.push_command(770, 0, legendText);
 }
 ```
 
@@ -5380,21 +5527,20 @@ void PauseMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
 
 class PauseMenuLayer : public IEngineLayer {
 private:
-    glm::vec4 m_panelBounds{ 450.0f, 180.0f, 300.0f, 410.0f };
+    glm::vec4 m_panelBounds{ 300.0f, 220.0f, 600.0f, 310.0f };
 
 public:
     PauseMenuLayer() = default;
     ~PauseMenuLayer() override = default;
 
-    void onAttach(EngineContext* ctx) override;
-    void onDetach(EngineContext* ctx) override;
+    void onAttach(EngineContext* ctx) override {}
+    void onDetach(EngineContext* ctx) override {}
 
-    // Modal overlay behavior: freezes physics updates and blocks input to layers beneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return true; }
     [[nodiscard]] bool blocksUpdates() const noexcept override { return true; }
 
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
-    void update(double dt, EngineContext* ctx) override;
+    void update(double dt, EngineContext* ctx) override {}
     void populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) override;
 };
 ```
@@ -5407,13 +5553,8 @@ public:
 #include "Gameplay.hpp"
 #include "HUD.hpp"
 #include "MainMenu.hpp"
-#include <iostream>
-#include <cstdio>
 #include <filesystem>
 
-// ============================================================================
-// SAVE / LOAD SYSTEM MANAGER HELPERS
-// ============================================================================
 std::string SaveLoadManager::GetSlotPath(int slotIndex) {
     return "saves/slot_" + std::to_string(slotIndex + 1) + ".dat";
 }
@@ -5421,7 +5562,6 @@ std::string SaveLoadManager::GetSlotPath(int slotIndex) {
 bool SaveLoadManager::ReadSlotHeader(int slotIndex, GameStateData& outData) {
     BinaryDeserializer deserializer;
     if (FileSystem::LoadFromFile(GetSlotPath(slotIndex), deserializer)) {
-        // Implicit deserialization via operator>>
         deserializer >> outData;
         return true;
     }
@@ -5429,107 +5569,95 @@ bool SaveLoadManager::ReadSlotHeader(int slotIndex, GameStateData& outData) {
 }
 
 // ============================================================================
-// SAVE MENU IMPLEMENTATION
+// SAVE MENU OVERLAY
 // ============================================================================
 void SaveMenuLayer::refreshSlotPreviews() {
     m_slotPreviews.assign(SaveLoadManager::NUM_SLOTS, GameStateData{});
     m_slotOccupied.assign(SaveLoadManager::NUM_SLOTS, false);
-
     for (int i = 0; i < SaveLoadManager::NUM_SLOTS; ++i) {
-        if (SaveLoadManager::ReadSlotHeader(i, m_slotPreviews[i])) {
-            m_slotOccupied[i] = true;
-        }
+        if (SaveLoadManager::ReadSlotHeader(i, m_slotPreviews[i])) m_slotOccupied[i] = true;
     }
 }
 
-void SaveMenuLayer::onAttach(EngineContext* ctx) {
-    std::cout << "[SaveMenuLayer] Opening Save Menu overlay.\n";
-    refreshSlotPreviews();
-}
-
+void SaveMenuLayer::onAttach(EngineContext* ctx) { refreshSlotPreviews(); }
 void SaveMenuLayer::onDetach(EngineContext* ctx) {}
 
 void SaveMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
-        if (ev.action == GLFW_PRESS && ev.key == GLFW_KEY_ESCAPE) {
-            ctx->layerStack->deferDetach(this);
-        }
+        if (ev.action == GLFW_PRESS && ev.key == GLFW_KEY_ESCAPE) ctx->layerStack->deferDetach(this);
     }
 }
 
 void SaveMenuLayer::update(double dt, EngineContext* ctx) {}
 
 void SaveMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Fullscreen Dim Backdrop
+    // 1. Semi-transparent backdrop dimming
     writeBuffer.push_command(850, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
-        .color = { 0.0f, 0.0f, 0.0f, 0.78f },
+        .color = { 0.0f, 0.0f, 0.0f, 0.75f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // 2. Dialog Panel
+    // 2. Dark Slate Modal Box
     writeBuffer.push_command(860, 0, RectPayload{
         .dest_rect = m_panelBounds,
-        .color = { 0.12f, 0.14f, 0.18f, 0.96f },
+        .color = { 0.12f, 0.15f, 0.20f, 0.98f },
         .no_texture = true,
         .is_world_space = false
         });
 
+    // Border Lines
+    glm::vec4 borderCol{ 0.28f, 0.35f, 0.46f, 1.0f };
+    writeBuffer.push_command(865, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, borderCol, 2.0f });
+    writeBuffer.push_command(865, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(865, 0, LinePayload{ {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(865, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+
     // 3. Header Title & Status
-    TextPayload titleText;
-    titleText.color = { 1.0f, 0.85f, 0.2f, 1.0f };
-    titleText.scale = 26.0f;
-    titleText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f };
-    titleText.showInCenter = true;
+    TextPayload titleText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 26.0f,
+        .showInCenter = true
+    };
     std::snprintf(titleText.text_content, sizeof(titleText.text_content), "SAVE GAME");
     writeBuffer.push_command(870, 0, titleText);
 
-    TextPayload statusText;
-    statusText.color = { 0.8f, 0.85f, 0.9f, 1.0f };
-    statusText.scale = 16.0f;
-    statusText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 65.0f };
-    statusText.showInCenter = true;
+    TextPayload statusText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 65.0f },
+        .color = { 0.75f, 0.82f, 0.92f, 1.0f },
+        .scale = 15.0f,
+        .showInCenter = true
+    };
     std::snprintf(statusText.text_content, sizeof(statusText.text_content), "%s", m_statusMessage.c_str());
     writeBuffer.push_command(870, 0, statusText);
 
-    float btnX = m_panelBounds.x + 30.0f;
-    float btnW = m_panelBounds.z - 60.0f;
-    float btnH = 75.0f;
+    float btnX = m_panelBounds.x + 35.0f;
+    float btnW = m_panelBounds.z - 70.0f;
     float startY = m_panelBounds.y + 95.0f;
-    float slotGap = 90.0f;
+    float slotGap = 92.0f;
 
-    // 4. Procedural Save Slots Loop
+    // 4. Save Slots
     for (int i = 0; i < SaveLoadManager::NUM_SLOTS; ++i) {
         float currentY = startY + (i * slotGap);
-        uint32_t widgetId = ID_SAVE_Slot_Base + i;
-
         char slotLabel[128];
         if (m_slotOccupied[i]) {
             const auto& data = m_slotPreviews[i];
-            std::snprintf(slotLabel, sizeof(slotLabel),
-                "SLOT %d: %s\nLVL %d | SCORE: %d\n%s",
-                i + 1, data.playerName.c_str(), data.currentLevel, data.currentScore,
-                data.getFormattedTimestamp().c_str());
+            std::snprintf(slotLabel, sizeof(slotLabel), "SLOT %d: %s | LVL %d | SCORE: %d\n%s",
+                i + 1, data.playerName.c_str(), data.currentLevel, data.currentScore, data.getFormattedTimestamp().c_str());
         }
         else {
             std::snprintf(slotLabel, sizeof(slotLabel), "SLOT %d: [ EMPTY ]", i + 1);
         }
 
-        if (ctx->ui.Button(writeBuffer, ctx, widgetId, { btnX, currentY, btnW, btnH }, slotLabel, 18.0f)) {
+        if (ctx->ui.Button(writeBuffer, ctx, ID_SAVE_Slot_Base + i, { btnX, currentY, btnW, 76.0f }, slotLabel, 16.0f)) {
             std::filesystem::create_directories("saves");
-
-            // Capture active telemetry from Blackboard
-            GameStateData currentPacket = GameStateData::CaptureFromBlackboard(ctx);
-
-            // Serialize data packet using operator<< implicit contract
+            GameStateData packet = GameStateData::CaptureFromBlackboard(ctx);
             BinarySerializer serializer;
-            serializer << currentPacket;
-
-            // Save to disk with CRC32 payload checksum
+            serializer << packet;
             if (FileSystem::SaveToFile(SaveLoadManager::GetSlotPath(i), serializer)) {
-                std::cout << "[SaveLoadLayer] Game state written to " << SaveLoadManager::GetSlotPath(i) << "\n";
                 m_statusMessage = "Saved successfully to Slot " + std::to_string(i + 1) + "!";
                 refreshSlotPreviews();
             }
@@ -5540,30 +5668,23 @@ void SaveMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
     }
 
     // 5. Back Button
-    if (ctx->ui.Button(writeBuffer, ctx, ID_SAVE_Back, { btnX, startY + (SaveLoadManager::NUM_SLOTS * slotGap) + 10.0f, btnW, 40.0f }, "BACK")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_SAVE_Back, { btnX, startY + (SaveLoadManager::NUM_SLOTS * slotGap) + 10.0f, btnW, 45.0f }, "BACK", 18.0f)) {
         ctx->layerStack->deferDetach(this);
     }
 }
 
 // ============================================================================
-// LOAD MENU IMPLEMENTATION
+// LOAD MENU OVERLAY
 // ============================================================================
 void LoadMenuLayer::refreshSlotPreviews() {
     m_slotPreviews.assign(SaveLoadManager::NUM_SLOTS, GameStateData{});
     m_slotOccupied.assign(SaveLoadManager::NUM_SLOTS, false);
-
     for (int i = 0; i < SaveLoadManager::NUM_SLOTS; ++i) {
-        if (SaveLoadManager::ReadSlotHeader(i, m_slotPreviews[i])) {
-            m_slotOccupied[i] = true;
-        }
+        if (SaveLoadManager::ReadSlotHeader(i, m_slotPreviews[i])) m_slotOccupied[i] = true;
     }
 }
 
-void LoadMenuLayer::onAttach(EngineContext* ctx) {
-    std::cout << "[LoadMenuLayer] Opening Load Menu screen.\n";
-    refreshSlotPreviews();
-}
-
+void LoadMenuLayer::onAttach(EngineContext* ctx) { refreshSlotPreviews(); }
 void LoadMenuLayer::onDetach(EngineContext* ctx) {}
 
 void LoadMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
@@ -5579,78 +5700,80 @@ void LoadMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
 void LoadMenuLayer::update(double dt, EngineContext* ctx) {}
 
 void LoadMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Base Background
-    writeBuffer.push_command(100, 0, RectPayload{
+    TextureHandle bg = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Main Menu/MainBackground.png");
+
+    writeBuffer.push_command(50, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
-        .color = { 0.08f, 0.1f, 0.12f, 1.0f },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = bg,
+        .no_texture = false,
+        .is_world_space = false
+        });
+
+    writeBuffer.push_command(55, 0, RectPayload{
+        .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
+        .color = { 0.0f, 0.0f, 0.0f, 0.65f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // 2. Dialog Panel
-    writeBuffer.push_command(110, 0, RectPayload{
+    // Dark Slate Modal Box
+    writeBuffer.push_command(60, 0, RectPayload{
         .dest_rect = m_panelBounds,
-        .color = { 0.12f, 0.14f, 0.18f, 0.96f },
+        .color = { 0.12f, 0.15f, 0.20f, 0.98f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // 3. Header Title & Status
-    TextPayload titleText;
-    titleText.color = { 0.3f, 0.85f, 1.0f, 1.0f };
-    titleText.scale = 26.0f;
-    titleText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f };
-    titleText.showInCenter = true;
+    glm::vec4 borderCol{ 0.28f, 0.35f, 0.46f, 1.0f };
+    writeBuffer.push_command(65, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(65, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+
+    TextPayload titleText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f },
+        .color = { 0.3f, 0.85f, 1.0f, 1.0f },
+        .scale = 26.0f,
+        .showInCenter = true
+    };
     std::snprintf(titleText.text_content, sizeof(titleText.text_content), "LOAD GAME");
-    writeBuffer.push_command(120, 0, titleText);
+    writeBuffer.push_command(70, 0, titleText);
 
-    TextPayload statusText;
-    statusText.color = { 0.8f, 0.85f, 0.9f, 1.0f };
-    statusText.scale = 16.0f;
-    statusText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 65.0f };
-    statusText.showInCenter = true;
+    TextPayload statusText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 65.0f },
+        .color = { 0.75f, 0.82f, 0.92f, 1.0f },
+        .scale = 15.0f,
+        .showInCenter = true
+    };
     std::snprintf(statusText.text_content, sizeof(statusText.text_content), "%s", m_statusMessage.c_str());
-    writeBuffer.push_command(120, 0, statusText);
+    writeBuffer.push_command(70, 0, statusText);
 
-    float btnX = m_panelBounds.x + 30.0f;
-    float btnW = m_panelBounds.z - 60.0f;
-    float btnH = 75.0f;
+    float btnX = m_panelBounds.x + 35.0f;
+    float btnW = m_panelBounds.z - 70.0f;
     float startY = m_panelBounds.y + 95.0f;
-    float slotGap = 90.0f;
+    float slotGap = 92.0f;
 
-    // 4. Procedural Load Slots Loop
     for (int i = 0; i < SaveLoadManager::NUM_SLOTS; ++i) {
         float currentY = startY + (i * slotGap);
-        uint32_t widgetId = ID_LOAD_Slot_Base + i;
-
         char slotLabel[128];
         if (m_slotOccupied[i]) {
             const auto& data = m_slotPreviews[i];
-            std::snprintf(slotLabel, sizeof(slotLabel),
-                "SLOT %d: %s\nLVL %d | SCORE: %d\n%s",
-                i + 1, data.playerName.c_str(), data.currentLevel, data.currentScore,
-                data.getFormattedTimestamp().c_str());
+            std::snprintf(slotLabel, sizeof(slotLabel), "SLOT %d: %s | LVL %d | SCORE: %d\n%s",
+                i + 1, data.playerName.c_str(), data.currentLevel, data.currentScore, data.getFormattedTimestamp().c_str());
         }
         else {
             std::snprintf(slotLabel, sizeof(slotLabel), "SLOT %d: [ EMPTY ]", i + 1);
         }
 
-        if (ctx->ui.Button(writeBuffer, ctx, widgetId, { btnX, currentY, btnW, btnH }, slotLabel, 18.0f)) {
+        if (ctx->ui.Button(writeBuffer, ctx, ID_LOAD_Slot_Base + i, { btnX, currentY, btnW, 76.0f }, slotLabel, 16.0f)) {
             if (m_slotOccupied[i]) {
                 BinaryDeserializer deserializer;
-
                 if (FileSystem::LoadFromFile(SaveLoadManager::GetSlotPath(i), deserializer)) {
                     GameStateData loadedPacket;
-
-                    // Implicit deserialization via operator>>
                     deserializer >> loadedPacket;
-
-                    // Hydrate Blackboard
                     loadedPacket.ApplyToBlackboard(ctx);
 
-                    std::cout << "[SaveLoadLayer] Restored save state from Slot " << (i + 1) << "!\n";
-
-                    // Transition to Gameplay
                     ctx->layerStack->deferClear();
                     ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
                     ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
@@ -5666,8 +5789,7 @@ void LoadMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         }
     }
 
-    // 5. Back Button
-    if (ctx->ui.Button(writeBuffer, ctx, ID_LOAD_Back, { btnX, startY + (SaveLoadManager::NUM_SLOTS * slotGap) + 10.0f, btnW, 40.0f }, "BACK")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_LOAD_Back, { btnX, startY + (SaveLoadManager::NUM_SLOTS * slotGap) + 10.0f, btnW, 45.0f }, "BACK", 18.0f)) {
         ctx->layerStack->deferAttach(std::make_unique<MainMenuLayer>());
         ctx->layerStack->deferDetach(this);
     }
@@ -5752,37 +5874,26 @@ public:
 // ==========================================
 ```cpp
 #include "SettingsLayer.hpp"
-#include <iostream>
-#include <cstdio>
 
 void SettingsMenuLayer::onAttach(EngineContext* ctx) {
-    std::cout << "[SettingsMenuLayer] Audio settings overlay opened.\n";
-
-    // Hydrate local cache values from AudioEngine mixing channels
     m_masterVol = ctx->audioEngine.getCategoryVolume(AudioCategory::Master);
     m_musicVol = ctx->audioEngine.getCategoryVolume(AudioCategory::Music);
     m_sfxVol = ctx->audioEngine.getCategoryVolume(AudioCategory::GameplaySFX);
 }
 
-void SettingsMenuLayer::onDetach(EngineContext* ctx) {
-    std::cout << "[SettingsMenuLayer] Audio settings overlay closed.\n";
-}
+void SettingsMenuLayer::onDetach(EngineContext* ctx) {}
 
 void SettingsMenuLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
-        if (ev.action == GLFW_PRESS && ev.key == GLFW_KEY_ESCAPE) {
-            ctx->layerStack->deferDetach(this);
-        }
+        if (ev.action == GLFW_PRESS && ev.key == GLFW_KEY_ESCAPE) ctx->layerStack->deferDetach(this);
     }
 }
 
-void SettingsMenuLayer::update(double dt, EngineContext* ctx) {
-    // Logic updates remain frozen while modal overlay is active
-}
+void SettingsMenuLayer::update(double dt, EngineContext* ctx) {}
 
 void SettingsMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Semi-transparent backdrop dimming
+    // 1. Semi-transparent Backdrop Dimming
     writeBuffer.push_command(800, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.75f },
@@ -5790,20 +5901,28 @@ void SettingsMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .is_world_space = false
         });
 
-    // 2. Settings Dialog Box Container
+    // 2. Settings Modal Dialog Box (Plain Dark Slate with Border)
     writeBuffer.push_command(810, 0, RectPayload{
         .dest_rect = m_panelBounds,
-        .color = { 0.12f, 0.13f, 0.17f, 0.96f },
+        .color = { 0.11f, 0.13f, 0.17f, 0.98f },
         .no_texture = true,
         .is_world_space = false
         });
 
+    // Border Outlines
+    glm::vec4 borderColor{ 0.28f, 0.32f, 0.42f, 1.0f };
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, borderColor, 2.0f });
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, borderColor, 2.0f });
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderColor, 2.0f });
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderColor, 2.0f });
+
     // 3. Header Title
-    TextPayload titleText;
-    titleText.color = { 1.0f, 0.85f, 0.2f, 1.0f }; // Gold accent
-    titleText.scale = 26.0f;
-    titleText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f };
-    titleText.showInCenter = true;
+    TextPayload titleText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 26.0f,
+        .showInCenter = true
+    };
     std::snprintf(titleText.text_content, sizeof(titleText.text_content), "AUDIO SETTINGS");
     writeBuffer.push_command(820, 0, titleText);
 
@@ -5812,51 +5931,48 @@ void SettingsMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
     float sliderW = m_panelBounds.z - 80.0f;
     float startY = m_panelBounds.y + 85.0f;
 
-    // --- MASTER VOLUME SLIDER ---
-    TextPayload masterLabel;
-    masterLabel.color = { 0.9f, 0.9f, 0.95f, 1.0f };
-    masterLabel.scale = 18.0f;
-    masterLabel.position = { labelX, startY };
-    masterLabel.showInCenter = false;
-    std::snprintf(masterLabel.text_content, sizeof(masterLabel.text_content),
-        "MASTER VOLUME: %d%%", static_cast<int>(m_masterVol * 100.0f));
+    // --- MASTER VOLUME ---
+    TextPayload masterLabel{
+        .position = { labelX, startY },
+        .color = { 0.9f, 0.9f, 0.95f, 1.0f },
+        .scale = 18.0f
+    };
+    std::snprintf(masterLabel.text_content, sizeof(masterLabel.text_content), "MASTER VOLUME: %d%%", static_cast<int>(m_masterVol * 100.0f));
     writeBuffer.push_command(820, 0, masterLabel);
 
-    if (ctx->ui.Slider(writeBuffer, ctx, ID_SET_MasterSlider, { sliderX, startY + 22.0f, sliderW, 20.0f }, m_masterVol)) {
+    if (ctx->ui.Slider(writeBuffer, ctx, ID_SET_MasterSlider, { sliderX, startY + 24.0f, sliderW, 16.0f }, m_masterVol)) {
         ctx->audioEngine.setCategoryVolume(AudioCategory::Master, m_masterVol);
     }
 
-    // --- MUSIC VOLUME SLIDER ---
-    TextPayload musicLabel;
-    musicLabel.color = { 0.9f, 0.9f, 0.95f, 1.0f };
-    musicLabel.scale = 18.0f;
-    musicLabel.position = { labelX, startY + 75.0f };
-    musicLabel.showInCenter = false;
-    std::snprintf(musicLabel.text_content, sizeof(musicLabel.text_content),
-        "MUSIC VOLUME: %d%%", static_cast<int>(m_musicVol * 100.0f));
+    // --- MUSIC VOLUME ---
+    TextPayload musicLabel{
+        .position = { labelX, startY + 75.0f },
+        .color = { 0.9f, 0.9f, 0.95f, 1.0f },
+        .scale = 18.0f
+    };
+    std::snprintf(musicLabel.text_content, sizeof(musicLabel.text_content), "MUSIC VOLUME: %d%%", static_cast<int>(m_musicVol * 100.0f));
     writeBuffer.push_command(820, 0, musicLabel);
 
-    if (ctx->ui.Slider(writeBuffer, ctx, ID_SET_MusicSlider, { sliderX, startY + 97.0f, sliderW, 20.0f }, m_musicVol)) {
+    if (ctx->ui.Slider(writeBuffer, ctx, ID_SET_MusicSlider, { sliderX, startY + 99.0f, sliderW, 16.0f }, m_musicVol)) {
         ctx->audioEngine.setCategoryVolume(AudioCategory::Music, m_musicVol);
     }
 
-    // --- SFX VOLUME SLIDER ---
-    TextPayload sfxLabel;
-    sfxLabel.color = { 0.9f, 0.9f, 0.95f, 1.0f };
-    sfxLabel.scale = 18.0f;
-    sfxLabel.position = { labelX, startY + 150.0f };
-    sfxLabel.showInCenter = false;
-    std::snprintf(sfxLabel.text_content, sizeof(sfxLabel.text_content),
-        "SFX VOLUME: %d%%", static_cast<int>(m_sfxVol * 100.0f));
+    // --- SFX VOLUME ---
+    TextPayload sfxLabel{
+        .position = { labelX, startY + 150.0f },
+        .color = { 0.9f, 0.9f, 0.95f, 1.0f },
+        .scale = 18.0f
+    };
+    std::snprintf(sfxLabel.text_content, sizeof(sfxLabel.text_content), "SFX VOLUME: %d%%", static_cast<int>(m_sfxVol * 100.0f));
     writeBuffer.push_command(820, 0, sfxLabel);
 
-    if (ctx->ui.Slider(writeBuffer, ctx, ID_SET_SFXSlider, { sliderX, startY + 172.0f, sliderW, 20.0f }, m_sfxVol)) {
+    if (ctx->ui.Slider(writeBuffer, ctx, ID_SET_SFXSlider, { sliderX, startY + 174.0f, sliderW, 16.0f }, m_sfxVol)) {
         ctx->audioEngine.setCategoryVolume(AudioCategory::GameplaySFX, m_sfxVol);
         ctx->audioEngine.setCategoryVolume(AudioCategory::InteractSFX, m_sfxVol);
     }
 
     // --- BACK BUTTON ---
-    if (ctx->ui.Button(writeBuffer, ctx, ID_SET_Back, { sliderX, startY + 250.0f, sliderW, 45.0f }, "BACK")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_SET_Back, { sliderX, startY + 240.0f, sliderW, 45.0f }, "BACK", 20.0f)) {
         ctx->layerStack->deferDetach(this);
     }
 }
@@ -5904,51 +6020,40 @@ public:
 #include "MainMenu.hpp"
 #include "Gameplay.hpp"
 #include "HUD.hpp"
-#include <iostream>
-#include <cstdio>
 
 void WinLosePopupLayer::onAttach(EngineContext* ctx) {
-    std::cout << "[WinLosePopupLayer] Game end overlay opened -> Suspending game simulation.\n";
+    if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) m_playerName = *nameOpt;
+    if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) m_finalScore = *scoreOpt;
+    if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) m_highestScore = *highScoreOpt;
+    if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) m_currentLevel = *levelOpt;
+    if (auto timeOpt = ctx->blackboard.get<float>("elapsedTime")) m_elapsedTime = *timeOpt;
 
-    // Retrieve end-of-match metrics from Blackboard
-    if (auto nameOpt = ctx->blackboard.get<std::string>("playerName")) {
-        m_playerName = *nameOpt;
-    }
-    if (auto scoreOpt = ctx->blackboard.get<int>("currentScore")) {
-        m_finalScore = *scoreOpt;
-    }
-    if (auto highScoreOpt = ctx->blackboard.get<int>("highestScore")) {
-        m_highestScore = *highScoreOpt;
-    }
-    if (auto levelOpt = ctx->blackboard.get<int>("currentLevel")) {
-        m_currentLevel = *levelOpt;
+    if (m_finalScore > m_highestScore) {
+        m_highestScore = m_finalScore;
+        ctx->blackboard.set("highestScore", m_highestScore);
     }
 }
 
-void WinLosePopupLayer::onDetach(EngineContext* ctx) {
-    std::cout << "[WinLosePopupLayer] Game end overlay closed.\n";
-}
+void WinLosePopupLayer::onDetach(EngineContext* ctx) {}
 
 void WinLosePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
-        if (ev.action == GLFW_PRESS) {
-            // Pressing 'Y' triggers an instant level restart
-            if (ev.key == GLFW_KEY_Y) {
-                ctx->layerStack->deferClear();
-                ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
-                ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
-            }
+        if (ev.action == GLFW_PRESS && ev.key == GLFW_KEY_Y) {
+            ctx->blackboard.set("currentLevel", 1);
+            ctx->blackboard.set("currentScore", 0);
+            ctx->blackboard.set("elapsedTime", 0.0f);
+
+            ctx->layerStack->deferClear();
+            ctx->layerStack->deferAttach(std::make_unique<GameplayLayer>());
+            ctx->layerStack->deferAttach(std::make_unique<HUDLayer>());
         }
     }
 }
 
-void WinLosePopupLayer::update(double dt, EngineContext* ctx) {
-    // Logic updates remain suspended while overlay is active
-}
+void WinLosePopupLayer::update(double dt, EngineContext* ctx) {}
 
 void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
-    // 1. Semi-transparent backdrop dimming pass
     writeBuffer.push_command(800, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.78f },
@@ -5956,54 +6061,84 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
         .is_world_space = false
         });
 
-    // 2. Dialog Box Container
     writeBuffer.push_command(810, 0, RectPayload{
         .dest_rect = m_panelBounds,
-        .color = { 0.12f, 0.13f, 0.16f, 0.96f },
+        .color = { 0.12f, 0.15f, 0.20f, 0.98f },
         .no_texture = true,
         .is_world_space = false
         });
 
-    // 3. Dynamic Match Result Banner
-    TextPayload titleText;
-    titleText.color = m_isVictory ? glm::vec4{ 0.2f, 0.9f, 0.3f, 1.0f }  // Green for Victory
-    : glm::vec4{ 0.95f, 0.2f, 0.2f, 1.0f }; // Red for Defeat
-    titleText.scale = 28.0f;
-    titleText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 35.0f };
-    titleText.showInCenter = true;
-    std::snprintf(titleText.text_content, sizeof(titleText.text_content),
-        m_isVictory ? "LEVEL CLEARED!" : "GAME OVER");
+    glm::vec4 borderCol = m_isVictory ? glm::vec4{ 0.2f, 0.85f, 0.4f, 1.0f } : glm::vec4{ 0.85f, 0.25f, 0.25f, 1.0f };
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, borderCol, 2.0f });
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y}, {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+    writeBuffer.push_command(815, 0, LinePayload{ {m_panelBounds.x, m_panelBounds.y + m_panelBounds.w}, {m_panelBounds.x + m_panelBounds.z, m_panelBounds.y + m_panelBounds.w}, borderCol, 2.0f });
+
+    // 1. Title Banner
+    TextPayload titleText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 36.0f },
+        .color = m_isVictory ? glm::vec4{ 0.2f, 0.95f, 0.35f, 1.0f } : glm::vec4{ 0.95f, 0.25f, 0.25f, 1.0f },
+        .scale = 26.0f,
+        .showInCenter = true
+    };
+    std::snprintf(titleText.text_content, sizeof(titleText.text_content), m_isVictory ? "CONGRATULATIONS!" : "GAME OVER");
     writeBuffer.push_command(820, 0, titleText);
 
-    // 4. Match Statistics Telemetry
-    TextPayload statsText;
-    statsText.color = { 0.9f, 0.92f, 0.98f, 1.0f };
-    statsText.scale = 20.0f;
-    statsText.position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 85.0f };
-    statsText.showInCenter = true;
-    std::snprintf(statsText.text_content, sizeof(statsText.text_content),
-        "FINAL SCORE: %d\nHIGH SCORE: %d\nPRESS 'Y' TO RESTART",
-        m_finalScore, m_highestScore);
-    writeBuffer.push_command(820, 0, statsText);
+    // 2. Degree Title & Badge Logo
+    const char* degreeTitle = (m_finalScore > 2500) ? "DOCTOR OF PHILOSOPHY (PH.D)"
+        : (m_finalScore > 1200) ? "MASTER OF SCIENCE"
+        : "BACHELOR OF SCIENCE";
 
-    // 5. Interactive UI Action Buttons
+    const char* badgePath = (m_finalScore > 2500) ? RESOURCES_PATH "Sprite/Result screen/PhDBadge.png"
+        : (m_finalScore > 1200) ? RESOURCES_PATH "Sprite/Result screen/MasterBadge.png"
+        : RESOURCES_PATH "Sprite/Result screen/BachelorBadge.png";
+
+    TextureHandle badgeTex = ctx->assetManager.loadTexture(badgePath);
+    writeBuffer.push_command(825, 0, RectPayload{
+        .dest_rect = { m_panelBounds.x + (m_panelBounds.z * 0.5f) - 34.0f, m_panelBounds.y + 60.0f, 68.0f, 68.0f },
+        .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+        .texture = badgeTex,
+        .no_texture = false,
+        .is_world_space = false
+        });
+
+    TextPayload degreeText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 145.0f },
+        .color = { 1.0f, 0.85f, 0.2f, 1.0f },
+        .scale = 16.0f,
+        .showInCenter = true
+    };
+    std::snprintf(degreeText.text_content, sizeof(degreeText.text_content), "TITLE: %s", degreeTitle);
+    writeBuffer.push_command(830, 0, degreeText);
+
+    // 3. Stats Block (Student, Score, Time)
+    int minutes = static_cast<int>(m_elapsedTime) / 60;
+    float seconds = std::fmod(m_elapsedTime, 60.0f);
+
+    TextPayload statsText{
+        .position = { m_panelBounds.x + (m_panelBounds.z * 0.5f), m_panelBounds.y + 195.0f },
+        .color = { 0.9f, 0.93f, 0.98f, 1.0f },
+        .scale = 16.0f,
+        .showInCenter = true
+    };
+    std::snprintf(statsText.text_content, sizeof(statsText.text_content),
+        "STUDENT: %s\nFINAL SCORE: %d | HIGH SCORE: %d\nTIME SURVIVED: %02d:%04.1f\n\nPRESS 'Y' TO RESTART",
+        m_playerName.c_str(), m_finalScore, m_highestScore, minutes, seconds);
+    writeBuffer.push_command(835, 0, statsText);
+
+    // 4. Action Buttons
     float btnX = m_panelBounds.x + 40.0f;
     float btnW = m_panelBounds.z - 80.0f;
-    float btnH = 45.0f;
-    float startY = m_panelBounds.y + 180.0f;
-    float gap = 58.0f;
+    float startY = m_panelBounds.y + 345.0f;
 
-    // SAVE RECORD: Attaches SaveMenuLayer to save progress via FileSystem binary serializer
-    if (ctx->ui.Button(writeBuffer, ctx, ID_POP_SaveRecord, { btnX, startY, btnW, btnH }, "SAVE RECORD")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_POP_SaveRecord, { btnX, startY, btnW, 44.0f }, "SAVE RECORD", 18.0f)) {
         ctx->layerStack->deferAttach(std::make_unique<SaveMenuLayer>());
         return;
     }
 
-    // MAIN MENU: Resets the entire layer stack and navigates back to MainMenuLayer
-    if (ctx->ui.Button(writeBuffer, ctx, ID_POP_MainMenu, { btnX, startY + gap, btnW, btnH }, "MAIN MENU")) {
+    if (ctx->ui.Button(writeBuffer, ctx, ID_POP_MainMenu, { btnX, startY + 54.0f, btnW, 44.0f }, "MAIN MENU", 18.0f)) {
         ctx->layerStack->clear(ctx);
         ctx->layerStack->pushLayer(std::make_unique<MainMenuLayer>(), ctx);
-        return;
     }
 }
 ```
@@ -6019,12 +6154,13 @@ void WinLosePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCont
 
 class WinLosePopupLayer : public IEngineLayer {
 private:
-    glm::vec4 m_panelBounds{ 400.0f, 210.0f, 400.0f, 380.0f };
+    glm::vec4 m_panelBounds{ 360.0f, 160.0f, 480.0f, 480.0f };
 
     std::string m_playerName = "HCMUS Student";
     int m_finalScore = 0;
     int m_highestScore = 0;
     int m_currentLevel = 1;
+    float m_elapsedTime = 0.0f;
     bool m_isVictory = false;
 
 public:
@@ -6034,7 +6170,6 @@ public:
     void onAttach(EngineContext* ctx) override;
     void onDetach(EngineContext* ctx) override;
 
-    // Modal overlay: suspends physics updates and blocks input to layers beneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return true; }
     [[nodiscard]] bool blocksUpdates() const noexcept override { return true; }
 

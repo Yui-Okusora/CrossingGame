@@ -5,12 +5,13 @@
 
 class WinLosePopupLayer : public IEngineLayer {
 private:
-    glm::vec4 m_panelBounds{ 400.0f, 210.0f, 400.0f, 380.0f };
+    glm::vec4 m_panelBounds{ 360.0f, 160.0f, 480.0f, 480.0f };
 
     std::string m_playerName = "HCMUS Student";
     int m_finalScore = 0;
     int m_highestScore = 0;
     int m_currentLevel = 1;
+    float m_elapsedTime = 0.0f;
     bool m_isVictory = false;
 
 public:
@@ -20,7 +21,6 @@ public:
     void onAttach(EngineContext* ctx) override;
     void onDetach(EngineContext* ctx) override;
 
-    // Modal overlay: suspends physics updates and blocks input to layers beneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return true; }
     [[nodiscard]] bool blocksUpdates() const noexcept override { return true; }
 
