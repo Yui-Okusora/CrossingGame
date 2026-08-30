@@ -2,14 +2,21 @@
 
 void DeadlinePopupLayer::onAttach(EngineContext* ctx) {
     if (!ctx) return;
+    ctx->blackboard.set("deadlinePopup", true);
     m_alertSFX = ctx->audioEngine.loadSound(SFX_PATH "elevator_chime.wav");
     ctx->audioEngine.play(m_alertSFX, AudioCategory::GameplaySFX);
+}
+
+void DeadlinePopupLayer::onDetach(EngineContext* ctx) {
+    if (!ctx) return;
+    ctx->blackboard.set("deadlinePopup", false);
 }
 
 void DeadlinePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
         if (ev.action == GLFW_PRESS && (ev.key == GLFW_KEY_ENTER || ev.key == GLFW_KEY_SPACE || ev.key == GLFW_KEY_ESCAPE)) {
+            ctx->blackboard.set("deadlinePopup", false);
             ctx->layerStack->deferDetach(this);
         }
     }
@@ -18,7 +25,7 @@ void DeadlinePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ct
 void DeadlinePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineContext* ctx) {
     TextureHandle deadlineTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/DeadlinePopup/DeadlinePopup.png");
 
-    // 1. Fullscreen Dimming Backdrop (Depth: 750)[cite: 1]
+    // 1. Fullscreen Dimming Backdrop (Depth: 750)
     writeBuffer.push_command(750, 0, RectPayload{
         .dest_rect = { 0.0f, 0.0f, 1200.0f, 805.0f },
         .color = { 0.0f, 0.0f, 0.0f, 0.78f },
@@ -26,8 +33,7 @@ void DeadlinePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCon
         .is_world_space = false
         });
 
-    // 2. Render the Complete DeadlinePopup.png Texture Centered (Depth: 760)
-    // Scaled to a clean window size of 520x280 pixels
+    // 2. Render Window Graphic Centered (Depth: 760)
     float popupW = 520.0f;
     float popupH = 280.0f;
     float popupX = (1200.0f - popupW) * 0.5f;
@@ -41,15 +47,14 @@ void DeadlinePopupLayer::populateRenderStream(RenderData& writeBuffer, EngineCon
         .is_world_space = false
         });
 
-    // 3. Interactive Invisible Button aligned precisely over the "OK" box on the texture
-    // Relative to popup window: OK button is centered horizontally near the bottom
+    // 3. Interactive OK Button
     float btnW = 110.0f;
     float btnH = 34.0f;
     float btnX = popupX + (popupW - btnW) * 0.5f;
     float btnY = popupY + popupH - 52.0f;
 
-    // Using an empty label so the UI system registers clicks without drawing a competing colored box
     if (ctx->ui.Button(writeBuffer, ctx, ID_DEADLINE_Dismiss, { btnX, btnY, btnW, btnH }, "")) {
+        ctx->blackboard.set("deadlinePopup", false);
         ctx->layerStack->deferDetach(this);
     }
 }

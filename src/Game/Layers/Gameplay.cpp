@@ -31,10 +31,11 @@ void GameplayLayer::updateDeadlinePopupTrigger(float dt, EngineContext* ctx) {
         m_deadlineTimer = 0.0f;
 
         static std::mt19937 popupRng(static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
-        std::uniform_real_distribution<float> intervalDist(15.0f, 30.0f);
+        std::uniform_real_distribution<float> intervalDist(10.0f, 20.0f);
         m_nextDeadlineInterval = intervalDist(popupRng);
 
         ctx->layerStack->deferAttach(std::make_unique<DeadlinePopupLayer>());
+        ctx->blackboard.set("deadlinePopup", true);
     }
 }
 

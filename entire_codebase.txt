@@ -3625,14 +3625,14 @@ GoalEntity::GoalEntity(const glm::vec2& pos,
 }
 
 void GoalEntity::onAttach(EngineContext* ctx) {
-    if (!ctx) return;
+    /*if (!ctx) return;
     TextureHandle goalTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/LevelUpLine.png");
     animator.addAnimation("static", AnimationClip{ goalTex, { 1, 1 }, 0, 0, 1.0f, false });
-    animator.play("static");
+    animator.play("static");*/
 }
 
 void GoalEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    animator.draw(writeBuffer, ctx, renderPos, size, glm::vec4(1.0f), m_renderDepth, true);
+   /* animator.draw(writeBuffer, ctx, renderPos, size, glm::vec4(1.0f), m_renderDepth, true);*/
 }
 ```
 
@@ -4050,21 +4050,23 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
     const float maxBufferDuration = isSpeedBoosted ? 0.08f : 0.12f;
 
     glm::vec2 freshDir{ 0.0f, 0.0f };
-    if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP)) {
-        freshDir.y -= m_config.gridSize;
-        m_facing = PlayerDirection::Up;
-    }
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN)) {
-        freshDir.y += m_config.gridSize;
-        m_facing = PlayerDirection::Down;
-    }
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT)) {
-        freshDir.x -= m_config.gridSize;
-        m_facing = PlayerDirection::Left;
-    }
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) {
-        freshDir.x += m_config.gridSize;
-        m_facing = PlayerDirection::Right;
+    if (!(ctx->blackboard.get<bool>("deadlinePopup"))) {
+        if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP)) {
+            freshDir.y -= m_config.gridSize;
+            m_facing = PlayerDirection::Up;
+        }
+        else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN)) {
+            freshDir.y += m_config.gridSize;
+            m_facing = PlayerDirection::Down;
+        }
+        else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT)) {
+            freshDir.x -= m_config.gridSize;
+            m_facing = PlayerDirection::Left;
+        }
+        else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) {
+            freshDir.x += m_config.gridSize;
+            m_facing = PlayerDirection::Right;
+        }
     }
 
     if (freshDir != glm::vec2(0.0f, 0.0f)) {
@@ -4408,10 +4410,16 @@ void DeadlinePopupLayer::onAttach(EngineContext* ctx) {
     ctx->audioEngine.play(m_alertSFX, AudioCategory::GameplaySFX);
 }
 
+void DeadlinePopupLayer::onDetach(EngineContext* ctx) {
+    if (!ctx) return;
+    ctx->blackboard.set("deadlinePopup", false);
+}
+
 void DeadlinePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {
         auto ev = std::get<KeyEvent>(event);
         if (ev.action == GLFW_PRESS && (ev.key == GLFW_KEY_ENTER || ev.key == GLFW_KEY_SPACE || ev.key == GLFW_KEY_ESCAPE)) {
+            ctx->blackboard.set("deadlinePopup", false);
             ctx->layerStack->deferDetach(this);
         }
     }
@@ -4475,11 +4483,11 @@ public:
     ~DeadlinePopupLayer() override = default;
 
     void onAttach(EngineContext* ctx) override;
-    void onDetach(EngineContext* ctx) override {}
+    void onDetach(EngineContext* ctx) override;
 
     // Freezes physics simulation and input for gameplay layers underneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return true; }
-    [[nodiscard]] bool blocksUpdates() const noexcept override { return true; }
+    [[nodiscard]] bool blocksUpdates() const noexcept override { return false; }
 
     void handleEvent(const EngineEvent& event, EngineContext* ctx) override;
     void update(double dt, EngineContext* ctx) override {}
@@ -4619,10 +4627,11 @@ void GameplayLayer::updateDeadlinePopupTrigger(float dt, EngineContext* ctx) {
         m_deadlineTimer = 0.0f;
 
         static std::mt19937 popupRng(static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
-        std::uniform_real_distribution<float> intervalDist(18.0f, 35.0f);
+        std::uniform_real_distribution<float> intervalDist(10.0f, 20.0f);
         m_nextDeadlineInterval = intervalDist(popupRng);
 
         ctx->layerStack->deferAttach(std::make_unique<DeadlinePopupLayer>());
+        ctx->blackboard.set("deadlinePopup", true);
     }
 }
 
@@ -4957,7 +4966,7 @@ void GameplayLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
             if (ev.key == GLFW_KEY_P || ev.key == GLFW_KEY_ESCAPE) {
                 ctx->layerStack->deferAttach(std::make_unique<PauseMenuLayer>());
             }
-            if (ev.key == GLFW_KEY_K) triggerGameOver(ctx);
+            //if (ev.key == GLFW_KEY_K) triggerGameOver(ctx);
         }
     }
 }
@@ -5082,12 +5091,48 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         }
 
         TextureHandle tex = m_texGrassSafePath;
+        bool skipDefaultDraw = false;
+
         if (lane.type == LaneType::SafeZone) {
-            if (i == 0 || i == 1) {
-                tex = m_texGrassStart;
+            if (i == 0) { continue; }
+            if (i == 1) {
+                writeBuffer.push_command(10, 0, RectPayload{
+                    .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height * 5.0f },
+                    .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    .texture = m_texGrassStart,
+                    .no_texture = false,
+                    .is_world_space = true
+                    });
+                continue;
+            }
+            else if (i == m_lanes.size() - 1 && m_mode == GameMode::Campaign
+                && m_currentLevel != m_maxLevel) {
+                float renderHeight = lane.height * 4.0f;
+                float extra = renderHeight - lane.height;
+
+                writeBuffer.push_command(10, 0, RectPayload{
+                    .dest_rect = { 0.0f, lane.yPosition - extra, 1200.0f, renderHeight },
+                    .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    .texture = m_texLevelUpLine,
+                    .no_texture = false,
+                    .is_world_space = true
+                    });
+                continue;
             }
             else if (i == m_lanes.size() - 1 && m_mode == GameMode::Campaign) {
-                tex = (m_currentLevel == m_maxLevel) ? m_texGrassEnd : m_texLevelUpLine;
+                bool isMaxLevel = (m_currentLevel == m_maxLevel);
+                TextureHandle endTex = isMaxLevel ? m_texGrassEnd : m_texLevelUpLine;
+                float renderHeight = lane.height * (isMaxLevel ? 5.0f : 5.0f);
+                float extra = renderHeight - lane.height;
+
+                writeBuffer.push_command(10, 0, RectPayload{
+                    .dest_rect = { 0.0f, lane.yPosition - extra, 1200.0f, renderHeight },
+                    .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    .texture = endTex,
+                    .no_texture = false,
+                    .is_world_space = true
+                    });
+                continue;
             }
             else {
                 tex = m_texGrassSafePath;
@@ -5220,7 +5265,7 @@ private:
 
     // Deadline Random Popup Tracker
     float m_deadlineTimer = 0.0f;
-    float m_nextDeadlineInterval = 20.0f;
+    float m_nextDeadlineInterval = 10.0f;
 
     // Endless Infinite Generation Trackers
     std::mt19937 m_endlessRng;
@@ -5882,15 +5927,15 @@ void PauseMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
     float keySize = 56.0f;
 
     // Row 1: Settings (Gear) & Save (Floppy Disk)
-    glm::vec4 settingBounds{ px + 124.0f, py + 52.0f, keySize, keySize };
-    glm::vec4 saveBounds{ px + 242.0f, py + 52.0f, keySize, keySize };
+    glm::vec4 settingBounds{ px + 153.0f, py + 42.0f, keySize, keySize };
+    glm::vec4 saveBounds{ px + 266.0f, py + 42.0f, keySize, keySize };
 
     // Row 2: Restart (Undo Arrow) & Resume (Play Arrow)
-    glm::vec4 restartBounds{ px + 182.0f, py + 148.0f, keySize, keySize };
-    glm::vec4 playBounds{ px + 300.0f, py + 148.0f, keySize, keySize };
+    glm::vec4 restartBounds{ px + +210.0, py + 152.0f, keySize, keySize };
+    glm::vec4 playBounds{ px + 323.0f, py + 152.0f, keySize, keySize };
 
     // Row 3: Main Menu (ESC Key - Wide 1.5u Keycap)
-    glm::vec4 escBounds{ px + 440.0f, py + 208.0f, 88.0f, keySize };
+    glm::vec4 escBounds{ px + 470.0f, py + 208.0f, 88.0f, keySize };
 
     // SETTINGS BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Settings, settingBounds, settingBtnTex, { 2, 1 })) {
@@ -5953,7 +5998,6 @@ void PauseMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
 class PauseMenuLayer : public IEngineLayer {
 private:
     glm::vec4 m_panelBounds{ 300.0f, 220.0f, 600.0f, 310.0f };
-
 public:
     PauseMenuLayer() = default;
     ~PauseMenuLayer() override = default;
@@ -6577,7 +6621,11 @@ void WinLosePopupLayer::onAttach(EngineContext* ctx) {
     }
 }
 
-void WinLosePopupLayer::onDetach(EngineContext* ctx) {}
+void WinLosePopupLayer::onDetach(EngineContext* ctx) {
+    const char* resultSfxPath = m_isVictory ? SFX_PATH "game_win.wav" : SFX_PATH "game_over.wav";
+    AudioHandle resultSFX = ctx->audioEngine.loadSound(resultSfxPath);
+    ctx->audioEngine.stop(resultSFX);
+}
 
 void WinLosePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {

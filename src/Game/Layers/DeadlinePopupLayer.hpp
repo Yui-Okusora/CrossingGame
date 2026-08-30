@@ -12,7 +12,7 @@ public:
     ~DeadlinePopupLayer() override = default;
 
     void onAttach(EngineContext* ctx) override;
-    void onDetach(EngineContext* ctx) override {}
+    void onDetach(EngineContext* ctx) override;
 
     // Freezes physics simulation and input for gameplay layers underneath
     [[nodiscard]] bool blocksEvents() const noexcept override { return true; }

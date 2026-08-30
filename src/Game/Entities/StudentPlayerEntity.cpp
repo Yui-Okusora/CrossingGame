@@ -161,21 +161,25 @@ void StudentPlayerEntity::onUpdate(float dt, EngineContext* ctx) {
     const float maxBufferDuration = isSpeedBoosted ? 0.08f : 0.12f;
 
     glm::vec2 freshDir{ 0.0f, 0.0f };
-    if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP)) {
-        freshDir.y -= m_config.gridSize;
-        m_facing = PlayerDirection::Up;
-    }
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN)) {
-        freshDir.y += m_config.gridSize;
-        m_facing = PlayerDirection::Down;
-    }
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT)) {
-        freshDir.x -= m_config.gridSize;
-        m_facing = PlayerDirection::Left;
-    }
-    else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) {
-        freshDir.x += m_config.gridSize;
-        m_facing = PlayerDirection::Right;
+    bool isPopupOpen = ctx->blackboard.get<bool>("deadlinePopup").value_or(false);
+
+    if (!isPopupOpen) {
+        if (ctx->input.isKeyJustPressed(GLFW_KEY_W) || ctx->input.isKeyJustPressed(GLFW_KEY_UP)) {
+            freshDir.y -= m_config.gridSize;
+            m_facing = PlayerDirection::Up;
+        }
+        else if (ctx->input.isKeyJustPressed(GLFW_KEY_S) || ctx->input.isKeyJustPressed(GLFW_KEY_DOWN)) {
+            freshDir.y += m_config.gridSize;
+            m_facing = PlayerDirection::Down;
+        }
+        else if (ctx->input.isKeyJustPressed(GLFW_KEY_A) || ctx->input.isKeyJustPressed(GLFW_KEY_LEFT)) {
+            freshDir.x -= m_config.gridSize;
+            m_facing = PlayerDirection::Left;
+        }
+        else if (ctx->input.isKeyJustPressed(GLFW_KEY_D) || ctx->input.isKeyJustPressed(GLFW_KEY_RIGHT)) {
+            freshDir.x += m_config.gridSize;
+            m_facing = PlayerDirection::Right;
+        }
     }
 
     if (freshDir != glm::vec2(0.0f, 0.0f)) {

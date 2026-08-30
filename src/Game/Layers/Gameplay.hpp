@@ -32,7 +32,7 @@ private:
 
     // Deadline Random Popup Tracker
     float m_deadlineTimer = 0.0f;
-    float m_nextDeadlineInterval = 20.0f;
+    float m_nextDeadlineInterval = 10.0f;
 
     // Endless Infinite Generation Trackers
     std::mt19937 m_endlessRng;
