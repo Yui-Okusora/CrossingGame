@@ -37,8 +37,8 @@ void StudentPlayerEntity::onAttach(EngineContext* ctx) {
     animator.addAnimation("hop_side", AnimationClip{ catSheet, { 6, 4 }, 12, 17, 0.05f, true });
     animator.addAnimation("idle", AnimationClip{ catSheet, { 6, 4 }, 18, 21, 0.28f, true });
 
-    // Outcome Animations (Updated Fallwater to 9 columns, frames 0 to 8)
-    animator.addAnimation("win", AnimationClip{ winSheet,       { 9, 1 }, 0, 8, 0.09f, true });
+    // Outcome Animations (Set win to non-looping false)
+    animator.addAnimation("win", AnimationClip{ winSheet,       { 9, 1 }, 0, 8, 0.09f, false });
     animator.addAnimation("lose", AnimationClip{ loseSheet,      { 9, 1 }, 0, 8, 0.09f, false });
     animator.addAnimation("fall_water", AnimationClip{ fallWaterSheet, { 9, 1 }, 0, 8, 0.09f, false });
 

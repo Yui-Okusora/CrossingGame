@@ -381,7 +381,8 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
     if (m_isGameOver) {
         m_scene.fixedUpdate(dt, ctx);
         m_endSequenceTimer += fDt;
-        if (m_endSequenceTimer >= 0.85f && !m_popupTriggered) {
+        bool animFinished = !m_player || m_player->animator.isCurrentAnimationFinished();
+        if ((animFinished || m_endSequenceTimer >= 0.85f) && !m_popupTriggered) {
             m_popupTriggered = true;
             ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(false));
         }
@@ -391,7 +392,8 @@ void GameplayLayer::update(double dt, EngineContext* ctx) {
     if (m_isLevelComplete && m_currentLevel == m_maxLevel) {
         m_scene.fixedUpdate(dt, ctx);
         m_endSequenceTimer += fDt;
-        if (m_endSequenceTimer >= 1.0f && !m_popupTriggered) {
+        bool animFinished = !m_player || m_player->animator.isCurrentAnimationFinished();
+        if ((animFinished || m_endSequenceTimer >= 0.85f) && !m_popupTriggered) {
             m_popupTriggered = true;
             ctx->layerStack->deferAttach(std::make_unique<WinLosePopupLayer>(true));
         }
