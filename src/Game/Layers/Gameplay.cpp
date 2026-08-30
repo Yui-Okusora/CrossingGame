@@ -494,12 +494,48 @@ void GameplayLayer::populateRenderStream(RenderData& writeBuffer, EngineContext*
         }
 
         TextureHandle tex = m_texGrassSafePath;
+        bool skipDefaultDraw = false;
+
         if (lane.type == LaneType::SafeZone) {
-            if (i == 0 || i == 1) {
-                tex = m_texGrassStart;
+            if (i == 0) { continue; }
+            if (i == 1) {
+                writeBuffer.push_command(10, 0, RectPayload{
+                    .dest_rect = { 0.0f, lane.yPosition, 1200.0f, lane.height * 5.0f },
+                    .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    .texture = m_texGrassStart,
+                    .no_texture = false,
+                    .is_world_space = true
+                    });
+                continue;
+            }
+            else if (i == m_lanes.size() - 1 && m_mode == GameMode::Campaign
+                && m_currentLevel != m_maxLevel) {
+                float renderHeight = lane.height * 4.0f;
+                float extra = renderHeight - lane.height;
+
+                writeBuffer.push_command(10, 0, RectPayload{
+                    .dest_rect = { 0.0f, lane.yPosition - extra, 1200.0f, renderHeight },
+                    .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    .texture = m_texLevelUpLine,
+                    .no_texture = false,
+                    .is_world_space = true
+                    });
+                continue;
             }
             else if (i == m_lanes.size() - 1 && m_mode == GameMode::Campaign) {
-                tex = (m_currentLevel == m_maxLevel) ? m_texGrassEnd : m_texLevelUpLine;
+                bool isMaxLevel = (m_currentLevel == m_maxLevel);
+                TextureHandle endTex = isMaxLevel ? m_texGrassEnd : m_texLevelUpLine;
+                float renderHeight = lane.height * (isMaxLevel ? 5.0f : 5.0f);
+                float extra = renderHeight - lane.height;
+
+                writeBuffer.push_command(10, 0, RectPayload{
+                    .dest_rect = { 0.0f, lane.yPosition - extra, 1200.0f, renderHeight },
+                    .color = { 1.0f, 1.0f, 1.0f, 1.0f },
+                    .texture = endTex,
+                    .no_texture = false,
+                    .is_world_space = true
+                    });
+                continue;
             }
             else {
                 tex = m_texGrassSafePath;

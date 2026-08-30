@@ -14,12 +14,12 @@ GoalEntity::GoalEntity(const glm::vec2& pos,
 }
 
 void GoalEntity::onAttach(EngineContext* ctx) {
-    if (!ctx) return;
+    /*if (!ctx) return;
     TextureHandle goalTex = ctx->assetManager.loadTexture(RESOURCES_PATH "Sprite/Grass/LevelUpLine.png");
     animator.addAnimation("static", AnimationClip{ goalTex, { 1, 1 }, 0, 0, 1.0f, false });
-    animator.play("static");
+    animator.play("static");*/
 }
 
 void GoalEntity::onRender(RenderData& writeBuffer, EngineContext* ctx, const glm::vec2& renderPos) {
-    animator.draw(writeBuffer, ctx, renderPos, size, glm::vec4(1.0f), m_renderDepth, true);
+   /* animator.draw(writeBuffer, ctx, renderPos, size, glm::vec4(1.0f), m_renderDepth, true);*/
 }

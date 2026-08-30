@@ -24,7 +24,11 @@ void WinLosePopupLayer::onAttach(EngineContext* ctx) {
     }
 }
 
-void WinLosePopupLayer::onDetach(EngineContext* ctx) {}
+void WinLosePopupLayer::onDetach(EngineContext* ctx) {
+    const char* resultSfxPath = m_isVictory ? SFX_PATH "game_win.wav" : SFX_PATH "game_over.wav";
+    AudioHandle resultSFX = ctx->audioEngine.loadSound(resultSfxPath);
+    ctx->audioEngine.stop(resultSFX);
+}
 
 void WinLosePopupLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
     if (std::holds_alternative<KeyEvent>(event)) {

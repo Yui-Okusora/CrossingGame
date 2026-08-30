@@ -5,7 +5,6 @@
 class PauseMenuLayer : public IEngineLayer {
 private:
     glm::vec4 m_panelBounds{ 300.0f, 220.0f, 600.0f, 310.0f };
-
 public:
     PauseMenuLayer() = default;
     ~PauseMenuLayer() override = default;

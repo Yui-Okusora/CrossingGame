@@ -58,15 +58,15 @@ void PauseMenuLayer::populateRenderStream(RenderData& writeBuffer, EngineContext
     float keySize = 56.0f;
 
     // Row 1: Settings (Gear) & Save (Floppy Disk)
-    glm::vec4 settingBounds{ px + 124.0f, py + 52.0f, keySize, keySize };
-    glm::vec4 saveBounds{ px + 242.0f, py + 52.0f, keySize, keySize };
+    glm::vec4 settingBounds{ px + 153.0f, py + 42.0f, keySize, keySize };
+    glm::vec4 saveBounds{ px + 266.0f, py + 42.0f, keySize, keySize };
 
     // Row 2: Restart (Undo Arrow) & Resume (Play Arrow)
-    glm::vec4 restartBounds{ px + 182.0f, py + 148.0f, keySize, keySize };
-    glm::vec4 playBounds{ px + 300.0f, py + 148.0f, keySize, keySize };
+    glm::vec4 restartBounds{ px + +210.0, py + 152.0f, keySize, keySize };
+    glm::vec4 playBounds{ px + 323.0f, py + 152.0f, keySize, keySize };
 
     // Row 3: Main Menu (ESC Key - Wide 1.5u Keycap)
-    glm::vec4 escBounds{ px + 440.0f, py + 208.0f, 88.0f, keySize };
+    glm::vec4 escBounds{ px + 470.0f, py + 208.0f, 88.0f, keySize };
 
     // SETTINGS BUTTON
     if (ctx->ui.TexturedButton(writeBuffer, ctx, ID_PAUSE_Settings, settingBounds, settingBtnTex, { 2, 1 })) {
