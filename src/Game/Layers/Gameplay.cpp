@@ -31,7 +31,7 @@ void GameplayLayer::updateDeadlinePopupTrigger(float dt, EngineContext* ctx) {
         m_deadlineTimer = 0.0f;
 
         static std::mt19937 popupRng(static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
-        std::uniform_real_distribution<float> intervalDist(18.0f, 35.0f);
+        std::uniform_real_distribution<float> intervalDist(15.0f, 30.0f);
         m_nextDeadlineInterval = intervalDist(popupRng);
 
         ctx->layerStack->deferAttach(std::make_unique<DeadlinePopupLayer>());
@@ -369,7 +369,7 @@ void GameplayLayer::handleEvent(const EngineEvent& event, EngineContext* ctx) {
             if (ev.key == GLFW_KEY_P || ev.key == GLFW_KEY_ESCAPE) {
                 ctx->layerStack->deferAttach(std::make_unique<PauseMenuLayer>());
             }
-            if (ev.key == GLFW_KEY_K) triggerGameOver(ctx);
+            //if (ev.key == GLFW_KEY_K) triggerGameOver(ctx);
         }
     }
 }
